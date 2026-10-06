@@ -97,6 +97,10 @@
           Aplikasi ini dibuka dari file atau alamat yang tidak aman (mis. file dari WhatsApp). Buka lewat link <b>https://</b> hasil hosting.
         </div>
 
+        <div id="local-warn" class="alert alert-warning small d-none" role="alert">
+          <i class="fa-solid fa-database me-1"></i><b>Mode lokal.</b> Belum terhubung ke database bersama, jadi akun siswa yang dibuat admin hanya ada di perangkat ini dan tidak bisa dipakai login di HP siswa.
+        </div>
+
         <ul class="nav nav-pills nav-fill bg-light rounded-3 p-1 mb-4">
           <li class="nav-item"><button type="button" id="tab-admin" class="nav-link" onclick="setLoginRole('admin')"><i class="fa-solid fa-user-shield me-1"></i>Admin / Guru</button></li>
           <li class="nav-item"><button type="button" id="tab-siswa" class="nav-link" onclick="setLoginRole('siswa')"><i class="fa-solid fa-user-graduate me-1"></i>Siswa</button></li>
@@ -617,6 +621,13 @@
     // TIDAK berfungsi jika halaman dibuka sebagai file (file://, content:// dari WhatsApp) atau http://alamat-IP.
     const KONTEKS_LOKASI_OK = location.protocol === 'https:' || ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 
+    // ===== DATABASE BERSAMA (Supabase) =====
+    // Isi kedua nilai ini agar admin & semua HP siswa memakai data yang sama (lihat panduan supabase-setup.sql).
+    // Jika dikosongkan, aplikasi berjalan "mode lokal": data hanya tersimpan di perangkat masing-masing.
+    const SUPABASE_URL = '';   // contoh: 'https://abcdefgh.supabase.co'
+    const SUPABASE_KEY = '';   // anon / publishable key dari Project Settings → API
+    const CLOUD_ON = !!(SUPABASE_URL && SUPABASE_KEY);
+
     // ==================== HELPER ====================
     const $ = id => document.getElementById(id);
 
@@ -695,27 +706,30 @@
     }
 
     // ==================== DATA ====================
+    const DEFAULT_ADMIN = { nama: 'Administrator', email: 'admin@school.id', password: 'admin123' };
     let currentUser = loadJSON('user_session', null);
-    let auth = loadJSON('db_auth', { nama: 'Administrator', email: 'admin@school.id', password: 'admin123' });
-    let config = loadJSON('db_config', {});
+    let auth = CLOUD_ON ? Object.assign({}, DEFAULT_ADMIN) : loadJSON('db_auth', Object.assign({}, DEFAULT_ADMIN));
+    let config = CLOUD_ON ? {} : loadJSON('db_config', {});
     if (Number(config.radius) > 0) SEKOLAH.radius = Number(config.radius);
 
-    let dataKelas = loadJSON('db_kelas', [
+    let dataKelas = CLOUD_ON ? [] : loadJSON('db_kelas', [
       { id: 'K1', nama: 'X IPA 1', wali: 'Drs. Budi Santoso' },
       { id: 'K2', nama: 'X IPS 2', wali: 'Siti Rahma, S.Pd' }
     ]);
-    let dataSiswa = loadJSON('db_siswa', [
+    let dataSiswa = CLOUD_ON ? [] : loadJSON('db_siswa', [
       { id: 'S1', nisn: '10012', nama: 'Ahmad Rizky', kelas: 'X IPA 1', username: '10012', password: 'siswa123' },
       { id: 'S2', nisn: '10013', nama: 'Dewi Lestari', kelas: 'X IPS 2', username: '10013', password: 'siswa123' }
     ]);
-    let dataAbsensi = loadJSON('db_absensi', []);
+    let dataAbsensi = CLOUD_ON ? [] : loadJSON('db_absensi', []);
 
     dataSiswa.forEach(s => {
       if (!s.username) s.username = s.nisn;
       if (!s.password) s.password = 'siswa123';
     });
 
+    // Mode lokal saja: simpan ke localStorage. Mode database: data ada di Supabase.
     function syncStorage() {
+      if (CLOUD_ON) return;
       try {
         localStorage.setItem('db_auth', JSON.stringify(auth));
         localStorage.setItem('db_config', JSON.stringify(config));
@@ -727,14 +741,140 @@
       }
     }
 
+    // ---------- Lapisan database (Supabase REST) ----------
+    const enc = encodeURIComponent;
+    let adminPage = 'dashboard';
+    let adminRefreshing = false;
+
+    async function sb(method, path, body, extra = {}) {
+      const headers = Object.assign({ apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, extra);
+      if (!SUPABASE_KEY.startsWith('sb_')) headers.Authorization = 'Bearer ' + SUPABASE_KEY;
+      if (method !== 'GET' && !headers.Prefer) headers.Prefer = 'return=minimal';
+      const res = await fetch(SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/' + path, {
+        method, headers, body: body === undefined ? undefined : JSON.stringify(body)
+      });
+      if (!res.ok) {
+        let msg = '';
+        try { msg = (await res.json()).message || ''; } catch (e) { /* abaikan */ }
+        const err = new Error(msg || ('HTTP ' + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      const txt = await res.text();
+      return txt ? JSON.parse(txt) : null;
+    }
+
+    function pesanDb(err) {
+      const m = String((err && err.message) || '');
+      if (err && (err.status === 409 || /duplicate key/i.test(m))) {
+        if (/username/i.test(m)) return 'Username sudah dipakai siswa lain!';
+        if (/nisn/i.test(m)) return 'NISN sudah terdaftar!';
+        if (/kelas/i.test(m)) return 'Nama kelas sudah ada!';
+        if (/absensi|siswa_id|tanggal/i.test(m)) return 'Siswa sudah diabsen pada tanggal tersebut.';
+        return 'Data duplikat: ' + m;
+      }
+      if (err instanceof TypeError) return 'Tidak dapat terhubung ke database. Periksa koneksi internet.';
+      return 'Gagal memproses ke database: ' + m;
+    }
+
+    const absToRow = a => ({
+      id: a.id, siswa_id: a.siswaId, nama_siswa: a.namaSiswa, kelas: a.kelas, status: a.status,
+      tanggal: a.tanggal, waktu: a.waktu,
+      lat: (a.lat === '' || a.lat == null) ? null : Number(a.lat),
+      lng: (a.lng === '' || a.lng == null) ? null : Number(a.lng),
+      foto: a.foto || null, jarak: a.jarak == null ? null : Math.round(a.jarak), sumber: a.sumber || 'siswa'
+    });
+    const rowToAbs = r => ({
+      id: r.id, siswaId: r.siswa_id, namaSiswa: r.nama_siswa, kelas: r.kelas, status: r.status,
+      tanggal: r.tanggal, waktu: r.waktu,
+      lat: r.lat == null ? '' : r.lat, lng: r.lng == null ? '' : r.lng,
+      foto: r.foto || null, jarak: r.jarak, sumber: r.sumber || 'siswa'
+    });
+
+    const cloudSetConfig = (key, value) =>
+      sb('POST', 'app_config?on_conflict=key', { key, value }, { Prefer: 'resolution=merge-duplicates,return=minimal' });
+
+    function terapkanRadius(rows) {
+      const r = (rows || []).find(x => x.key === 'radius');
+      if (r && Number(r.value && r.value.value) > 0) SEKOLAH.radius = Number(r.value.value);
+    }
+
+    async function loadAdminData() {
+      const [k, sw, ab, cf] = await Promise.all([
+        sb('GET', 'kelas?select=*&order=nama.asc'),
+        sb('GET', 'siswa?select=*&order=nama.asc'),
+        sb('GET', 'absensi?select=*&order=tanggal.desc,waktu.desc&limit=500'),
+        sb('GET', 'app_config?select=*')
+      ]);
+      dataKelas = k;
+      dataSiswa = sw;
+      dataAbsensi = ab.map(rowToAbs).reverse();          // lama → baru
+      const adm = cf.find(x => x.key === 'admin');
+      if (adm) auth = adm.value;
+      terapkanRadius(cf);
+    }
+
+    async function loadStudentData() {
+      const id = currentUser.siswaId;
+      const [me, ab, cf] = await Promise.all([
+        sb('GET', 'siswa?select=*&id=eq.' + enc(id)),
+        sb('GET', 'absensi?select=*&siswa_id=eq.' + enc(id) + '&order=tanggal.desc,waktu.desc&limit=200'),
+        sb('GET', 'app_config?select=*&key=eq.radius')
+      ]);
+      if (!me.length) throw Object.assign(new Error('Akun siswa tidak ditemukan'), { status: 404 });
+      dataSiswa = me;
+      dataAbsensi = ab.map(rowToAbs).reverse();
+      terapkanRadius(cf);
+    }
+
+    const sigData = () => [dataKelas.length, dataSiswa.length, dataAbsensi.length, (dataAbsensi[dataAbsensi.length - 1] || {}).id].join('|');
+
+    // Muat ulang data admin di latar belakang; render ulang halaman hanya jika ada perubahan
+    async function refreshAdminPage(pageId) {
+      if (!CLOUD_ON || adminRefreshing) return;
+      adminRefreshing = true;
+      try {
+        const before = sigData();
+        await loadAdminData();
+        if (adminPage === pageId && sigData() !== before) {
+          if (pageId === 'dashboard') renderDashboard();
+          if (pageId === 'siswa') renderSiswa();
+          if (pageId === 'kelas') renderKelas();
+          if (pageId === 'riwayat') renderRiwayat();
+          if (pageId === 'rekap') renderRekap();
+        }
+      } catch (e) { /* diam: akan dicoba lagi */ }
+      finally { adminRefreshing = false; }
+    }
+
     // ==================== INIT ====================
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
       syncStorage();
       renderAdminMenu();
       if (!KONTEKS_LOKASI_OK) $('proto-warn').classList.remove('d-none');
+      if (!CLOUD_ON) $('local-warn').classList.remove('d-none');
       if (IS_MOBILE) document.querySelectorAll('[data-desktop-only]').forEach(el => el.classList.add('hidden-page'));
       setLoginRole('admin');
+
+      // Pulihkan sesi dari database
+      if (CLOUD_ON && currentUser) {
+        try {
+          if (currentUser.role === 'admin') await loadAdminData();
+          else await loadStudentData();
+        } catch (err) {
+          currentUser = null;
+          localStorage.removeItem('user_session');
+          notify(err.status === 404 ? 'Sesi berakhir, silakan login kembali.' : pesanDb(err), 'warning', 5000);
+        }
+      }
       enterApp();
+
+      // Admin: muat data baru otomatis tiap 20 detik (absensi siswa masuk)
+      setInterval(() => {
+        if (CLOUD_ON && currentUser && currentUser.role === 'admin' && ['dashboard', 'riwayat', 'rekap'].includes(adminPage)) {
+          refreshAdminPage(adminPage);
+        }
+      }, 20000);
     });
 
     function enterApp() {
@@ -755,20 +895,47 @@
       $('login-alert').classList.add('d-none');
     }
 
-    function handleLogin(e) {
+    async function handleLogin(e) {
       e.preventDefault();
       const u = $('login-user').value.trim();
       const p = $('login-pass').value;
+      const btn = $('login-btn');
+      const label = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Memeriksa...';
       let ok = false;
 
-      if (loginRole === 'admin') {
-        if ((u === 'admin' || u === auth.email) && p === auth.password) {
-          currentUser = { role: 'admin', nama: auth.nama, email: auth.email };
-          ok = true;
+      try {
+        if (loginRole === 'admin') {
+          if (CLOUD_ON) {
+            const rows = await sb('GET', 'app_config?select=value&key=eq.admin');
+            if (rows.length) auth = rows[0].value;
+          }
+          if ((u === 'admin' || u === auth.email) && p === auth.password) {
+            currentUser = { role: 'admin', nama: auth.nama, email: auth.email };
+            if (CLOUD_ON) await loadAdminData();
+            ok = true;
+          }
+        } else {
+          let s;
+          if (CLOUD_ON) {
+            const rows = await sb('GET', 'siswa?select=*&username=eq.' + enc(u) + '&password=eq.' + enc(p) + '&limit=1');
+            s = rows[0];
+          } else {
+            s = dataSiswa.find(x => x.username === u && x.password === p);
+          }
+          if (s) {
+            currentUser = { role: 'siswa', siswaId: s.id };
+            if (CLOUD_ON) await loadStudentData();
+            ok = true;
+          }
         }
-      } else {
-        const s = dataSiswa.find(x => x.username === u && x.password === p);
-        if (s) { currentUser = { role: 'siswa', siswaId: s.id }; ok = true; }
+      } catch (err) {
+        notify(pesanDb(err), 'danger', 6000);
+        return;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = label;
       }
 
       if (ok) {
@@ -1252,6 +1419,7 @@
     }
 
     function switchPage(pageId) {
+      adminPage = pageId;
       if (pageId !== 'absensi') stopCamera();
       const oc = bootstrap.Offcanvas.getInstance($('admin-offcanvas'));
       if (oc) oc.hide();
@@ -1268,6 +1436,7 @@
       if (pageId === 'riwayat') renderRiwayat();
       if (pageId === 'rekap') renderRekap();
       if (pageId === 'profil') prepareProfil();
+      if (CLOUD_ON && ['dashboard', 'siswa', 'kelas', 'riwayat', 'rekap'].includes(pageId)) refreshAdminPage(pageId);
     }
 
     // ---------- Dashboard ----------
@@ -1417,7 +1586,7 @@
     }
     const closeModalSiswa = () => hideModal('modal-siswa');
 
-    function saveSiswa(e) {
+    async function saveSiswa(e) {
       e.preventDefault();
       const id = $('siswa-id').value;
       const nisn = $('siswa-nisn').value.trim();
@@ -1430,12 +1599,24 @@
       if (dataSiswa.some(s => s.username === username && s.id !== id)) { notify('Username sudah dipakai siswa lain!', 'danger'); return; }
       if (username === 'admin' || username === auth.email) { notify('Username tersebut dicadangkan untuk admin.', 'danger'); return; }
 
+      const newId = id || 'S' + Date.now();
+      if (CLOUD_ON) {
+        try {
+          if (id) {
+            await sb('PATCH', 'siswa?id=eq.' + enc(id), { nisn, nama, kelas, username, password });
+            await sb('PATCH', 'absensi?siswa_id=eq.' + enc(id), { nama_siswa: nama, kelas });
+          } else {
+            await sb('POST', 'siswa', { id: newId, nisn, nama, kelas, username, password });
+          }
+        } catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
+
       if (id) {
         const idx = dataSiswa.findIndex(s => s.id === id);
         dataSiswa[idx] = { id, nisn, nama, kelas, username, password };
         dataAbsensi.forEach(a => { if (a.siswaId === id) { a.namaSiswa = nama; a.kelas = kelas; } });
       } else {
-        dataSiswa.push({ id: 'S' + Date.now(), nisn, nama, kelas, username, password });
+        dataSiswa.push({ id: newId, nisn, nama, kelas, username, password });
       }
       syncStorage();
       closeModalSiswa();
@@ -1458,6 +1639,10 @@
 
     async function deleteSiswa(id) {
       if (!await askConfirm('Yakin ingin menghapus siswa ini? Riwayat absensinya juga akan dihapus.', 'Hapus Siswa', 'Hapus', 'btn-danger')) return;
+      if (CLOUD_ON) {
+        try { await sb('DELETE', 'siswa?id=eq.' + enc(id)); }
+        catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
       dataSiswa = dataSiswa.filter(s => s.id !== id);
       dataAbsensi = dataAbsensi.filter(a => a.siswaId !== id);
       syncStorage();
@@ -1487,7 +1672,7 @@
     }
     const closeModalKelas = () => hideModal('modal-kelas');
 
-    function saveKelas(e) {
+    async function saveKelas(e) {
       e.preventDefault();
       const id = $('kelas-id').value;
       const nama = $('kelas-nama').value.trim();
@@ -1495,16 +1680,31 @@
 
       if (dataKelas.some(k => k.nama.toLowerCase() === nama.toLowerCase() && k.id !== id)) { notify('Nama kelas sudah ada!', 'danger'); return; }
 
+      const newId = id || 'K' + Date.now();
+      const namaLama = id ? dataKelas.find(k => k.id === id).nama : null;
+      if (CLOUD_ON) {
+        try {
+          if (id) {
+            await sb('PATCH', 'kelas?id=eq.' + enc(id), { nama, wali });
+            if (namaLama !== nama) {
+              await sb('PATCH', 'siswa?kelas=eq.' + enc(namaLama), { kelas: nama });
+              await sb('PATCH', 'absensi?kelas=eq.' + enc(namaLama), { kelas: nama });
+            }
+          } else {
+            await sb('POST', 'kelas', { id: newId, nama, wali });
+          }
+        } catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
+
       if (id) {
         const idx = dataKelas.findIndex(k => k.id === id);
-        const namaLama = dataKelas[idx].nama;
         dataKelas[idx] = { id, nama, wali };
         if (namaLama !== nama) {
           dataSiswa.forEach(s => { if (s.kelas === namaLama) s.kelas = nama; });
           dataAbsensi.forEach(a => { if (a.kelas === namaLama) a.kelas = nama; });
         }
       } else {
-        dataKelas.push({ id: 'K' + Date.now(), nama, wali });
+        dataKelas.push({ id: newId, nama, wali });
       }
       syncStorage();
       closeModalKelas();
@@ -1527,6 +1727,10 @@
       if (!k) return;
       if (dataSiswa.some(s => s.kelas === k.nama)) { notify('Kelas ini masih memiliki siswa. Pindahkan / hapus siswanya terlebih dahulu.', 'warning', 5000); return; }
       if (!await askConfirm('Yakin hapus kelas ini?', 'Hapus Kelas', 'Hapus', 'btn-danger')) return;
+      if (CLOUD_ON) {
+        try { await sb('DELETE', 'kelas?id=eq.' + enc(id)); }
+        catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
       dataKelas = dataKelas.filter(x => x.id !== id);
       syncStorage();
       renderKelas();
@@ -1559,12 +1763,24 @@
       const now = new Date();
       const tanggal = localDate(now);
 
-      const sudahAda = dataAbsensi.find(a => a.siswaId === siswa.id && a.tanggal === tanggal);
+      let sudahAda = dataAbsensi.find(a => a.siswaId === siswa.id && a.tanggal === tanggal);
+      if (CLOUD_ON) {
+        try {
+          const ex = await sb('GET', 'absensi?select=id,status&siswa_id=eq.' + enc(siswa.id) + '&tanggal=eq.' + tanggal);
+          sudahAda = ex.length ? { id: ex[0].id, status: ex[0].status } : null;
+        } catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
       if (sudahAda && !await askConfirm(`${siswa.nama} sudah diabsen hari ini (${sudahAda.status}). Ganti dengan data baru?`, 'Absensi Sudah Ada', 'Ganti', 'btn-warning')) return;
-      if (sudahAda) dataAbsensi = dataAbsensi.filter(a => a.id !== sudahAda.id);
 
       const rec = buatRecord(siswa, status, '', '', photoData['adm-'], now);
       rec.sumber = 'admin';        // input langsung oleh admin/guru (tanpa lokasi)
+      if (CLOUD_ON) {
+        try {
+          if (sudahAda) await sb('DELETE', 'absensi?siswa_id=eq.' + enc(siswa.id) + '&tanggal=eq.' + tanggal);
+          await sb('POST', 'absensi', absToRow(rec));
+        } catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
+      dataAbsensi = dataAbsensi.filter(a => !(a.siswaId === siswa.id && a.tanggal === tanggal));
       dataAbsensi.push(rec);
       syncStorage();
       notify('Absensi berhasil disimpan!');
@@ -1597,6 +1813,10 @@
 
     async function deleteAbsensi(id) {
       if (!await askConfirm('Hapus entri absensi ini?', 'Hapus Absensi', 'Hapus', 'btn-danger')) return;
+      if (CLOUD_ON) {
+        try { await sb('DELETE', 'absensi?id=eq.' + enc(id)); }
+        catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
       dataAbsensi = dataAbsensi.filter(a => a.id !== id);
       syncStorage();
       renderRiwayat();
@@ -1662,13 +1882,18 @@
       $('cfg-radius').value = SEKOLAH.radius;
     }
 
-    function saveProfil(e) {
+    async function saveProfil(e) {
       e.preventDefault();
       const nama = $('profil-nama').value.trim();
       const email = $('profil-email').value.trim();
       const pass = $('profil-pass').value;
 
       if (dataSiswa.some(s => s.username === email)) { notify('Username tersebut sudah dipakai oleh siswa.', 'danger'); return; }
+
+      if (CLOUD_ON) {
+        try { await cloudSetConfig('admin', { nama, email, password: pass || auth.password }); }
+        catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
 
       currentUser.nama = nama; currentUser.email = email;
       auth.nama = nama; auth.email = email;
@@ -1682,10 +1907,14 @@
       notify('Profil berhasil diperbarui!');
     }
 
-    function saveConfig(e) {
+    async function saveConfig(e) {
       e.preventDefault();
       const r = Number($('cfg-radius').value);
       if (!(r >= 20 && r <= 5000)) { notify('Radius harus antara 20 - 5000 meter.', 'danger'); return; }
+      if (CLOUD_ON) {
+        try { await cloudSetConfig('radius', { value: r }); }
+        catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
       SEKOLAH.radius = r;
       config.radius = r;
       syncStorage();
@@ -1754,7 +1983,8 @@
       e.preventDefault();
       const me = getMe();
       const now = new Date();
-      if (dataAbsensi.some(a => a.siswaId === me.id && a.tanggal === localDate(now))) {
+      const tanggal = localDate(now);
+      if (dataAbsensi.some(a => a.siswaId === me.id && a.tanggal === tanggal)) {
         notify('Anda sudah absen hari ini.', 'warning');
         renderStudentHome();
         return;
@@ -1797,10 +2027,24 @@
           }
         }
 
-        dataAbsensi.push(buatRecord(me, status, lat, lng, photoData['std-'], now));
+        const rec = buatRecord(me, status, lat, lng, photoData['std-'], now);
+        if (CLOUD_ON) {
+          btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mengirim...';
+          const ex = await sb('GET', 'absensi?select=id&siswa_id=eq.' + enc(me.id) + '&tanggal=eq.' + tanggal);
+          if (ex.length) {                       // sudah absen dari perangkat lain
+            notify('Anda sudah absen hari ini.', 'warning');
+            await loadStudentData();
+            renderStudentHome();
+            return;
+          }
+          await sb('POST', 'absensi', absToRow(rec));
+        }
+        dataAbsensi.push(rec);
         syncStorage();
         notify('Absensi berhasil dikirim!');
         renderStudentHome();
+      } catch (err) {
+        notify(pesanDb(err), 'danger', 6000);
       } finally {
         btn.disabled = false;
         btn.innerHTML = 'Kirim Absensi';
@@ -1835,11 +2079,16 @@
       $('sp-new').value = '';
     }
 
-    function saveProfilSiswa(e) {
+    async function saveProfilSiswa(e) {
       e.preventDefault();
       const me = getMe();
       if ($('sp-old').value !== me.password) { notify('Password lama salah.', 'danger'); return; }
-      me.password = $('sp-new').value;
+      const baru = $('sp-new').value;
+      if (CLOUD_ON) {
+        try { await sb('PATCH', 'siswa?id=eq.' + enc(me.id), { password: baru }); }
+        catch (err) { notify(pesanDb(err), 'danger', 5500); return; }
+      }
+      me.password = baru;
       syncStorage();
       $('sp-old').value = '';
       $('sp-new').value = '';
