@@ -1,0 +1,1850 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistem Absensi Sekolah Online</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Font Awesome (ikon) -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <!-- Leaflet (peta) -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <style>
+    body { background: #f1f5f9; }
+    .hidden-page { display: none !important; }
+
+    /* warna indigo (admin) */
+    .btn-indigo { --bs-btn-color:#fff; --bs-btn-bg:#4f46e5; --bs-btn-border-color:#4f46e5;
+      --bs-btn-hover-color:#fff; --bs-btn-hover-bg:#4338ca; --bs-btn-hover-border-color:#4338ca;
+      --bs-btn-active-color:#fff; --bs-btn-active-bg:#3730a3; --bs-btn-active-border-color:#3730a3;
+      --bs-btn-disabled-bg:#4f46e5; --bs-btn-disabled-border-color:#4f46e5; }
+    .text-indigo { color:#4f46e5 !important; }
+    .text-bg-indigo { background:#4f46e5; color:#fff; }
+    .bg-indigo-soft { background:#eef2ff; }
+    .tab-indigo.active { background-color:#4f46e5 !important; }
+    .brand-icon { width:64px; height:64px; border-radius:1rem; display:inline-flex; align-items:center; justify-content:center; color:#fff; font-size:1.6rem; }
+
+    /* sidebar admin */
+    .sidebar { width:260px; background:#0f172a; min-height:100vh; }
+    .side-nav .nav-link { color:#94a3b8; border-radius:.75rem; padding:.7rem 1rem; font-size:.92rem; font-weight:500; }
+    .side-nav .nav-link:hover { background:#1e293b; color:#fff; }
+    .side-nav .nav-link.active { background:#1e293b; color:#818cf8; }
+
+    .stat-icon { width:48px; height:48px; border-radius:.9rem; display:flex; align-items:center; justify-content:center; font-size:1.3rem; }
+
+    /* peta */
+    .map-box { height:380px; border-radius:1rem; z-index:0; }
+    .map-mini { height:220px; border-radius:.75rem; z-index:0; }
+    .gmaps-frame { width:100%; height:380px; border:0; border-radius:1rem; }
+
+    /* tampilan siswa */
+    .student-shell { max-width:480px; }
+    .std-header { background:linear-gradient(135deg,#059669,#0d9488); border-bottom-left-radius:1.5rem; border-bottom-right-radius:1.5rem; }
+    .snav { color:#94a3b8; border:0; background:transparent; padding:.7rem 0; font-size:.75rem; font-weight:500; }
+    .snav i { display:block; font-size:1.15rem; margin-bottom:2px; transition:transform .15s; }
+    .snav.active { color:#059669; }
+    .snav.active i { transform:translateY(-2px); }
+
+    /* kamera */
+    .cam-box { position:relative; background:#0f172a; border-radius:.9rem; overflow:hidden; aspect-ratio:4/3; }
+    .cam-box video, .cam-box img { width:100%; height:100%; object-fit:cover; display:block; }
+    .cam-box video { transform:scaleX(-1); }            /* efek cermin selfie */
+    .cam-status { position:absolute; left:.6rem; top:.6rem; z-index:2; }
+    .cam-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#22c55e; margin-right:5px; animation:blink 1.2s infinite; }
+    @keyframes blink { 50% { opacity:.25; } }
+
+    #toast-box { z-index:2000; }
+  </style>
+</head>
+<body>
+
+  <!-- Toast container (notifikasi) -->
+  <div id="toast-box" class="toast-container position-fixed top-0 end-0 p-3"></div>
+
+  <!-- Modal konfirmasi (pengganti confirm()) -->
+  <div class="modal fade" id="modal-confirm" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-body p-4 text-center">
+          <div class="mb-3 text-warning fs-1"><i class="fa-solid fa-circle-question"></i></div>
+          <h6 id="cf-title" class="fw-bold mb-2">Konfirmasi</h6>
+          <p id="cf-body" class="text-secondary small mb-4"></p>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-light flex-fill" data-bs-dismiss="modal">Batal</button>
+            <button type="button" id="cf-ok" class="btn btn-primary flex-fill">Ya</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== LOGIN (dipakai bersama) ==================== -->
+  <div id="page-login" class="min-vh-100 d-flex align-items-center justify-content-center p-3">
+    <div class="card shadow-lg border-0 rounded-4 w-100" style="max-width:430px">
+      <div class="card-body p-4 p-md-5">
+        <div class="text-center mb-4">
+          <div class="brand-icon bg-primary mb-3 shadow" style="background:#4f46e5 !important"><i class="fa-solid fa-user-check"></i></div>
+          <h4 class="fw-bold mb-1">Sistem Absensi Sekolah</h4>
+          <p class="text-secondary small mb-0">Silakan masuk sesuai peran Anda</p>
+        </div>
+
+        <div id="proto-warn" class="alert alert-danger small d-none" role="alert">
+          <i class="fa-solid fa-triangle-exclamation me-1"></i><b>Fitur lokasi tidak akan berfungsi.</b>
+          Aplikasi ini dibuka dari file atau alamat yang tidak aman (mis. file dari WhatsApp). Buka lewat link <b>https://</b> hasil hosting.
+        </div>
+
+        <ul class="nav nav-pills nav-fill bg-light rounded-3 p-1 mb-4">
+          <li class="nav-item"><button type="button" id="tab-admin" class="nav-link" onclick="setLoginRole('admin')"><i class="fa-solid fa-user-shield me-1"></i>Admin / Guru</button></li>
+          <li class="nav-item"><button type="button" id="tab-siswa" class="nav-link" onclick="setLoginRole('siswa')"><i class="fa-solid fa-user-graduate me-1"></i>Siswa</button></li>
+        </ul>
+
+        <div id="login-alert" class="alert alert-danger py-2 small d-none" role="alert">Username/Password salah!</div>
+
+        <form id="form-login" onsubmit="handleLogin(event)" autocomplete="off">
+          <div class="mb-3">
+            <label id="login-user-label" class="form-label small fw-semibold">Username</label>
+            <div class="input-group">
+              <span class="input-group-text bg-white"><i class="fa-solid fa-user text-secondary"></i></span>
+              <input type="text" id="login-user" class="form-control" required autocomplete="off" placeholder="Masukkan username">
+            </div>
+          </div>
+          <div class="mb-4">
+            <label class="form-label small fw-semibold">Password</label>
+            <div class="input-group">
+              <span class="input-group-text bg-white"><i class="fa-solid fa-lock text-secondary"></i></span>
+              <input type="password" id="login-pass" class="form-control" required autocomplete="new-password" placeholder="Masukkan password">
+            </div>
+          </div>
+          <button type="submit" id="login-btn" class="btn btn-indigo w-100 py-2 fw-semibold">Masuk ke Sistem</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--                       TAMPILAN ADMIN                         -->
+  <!-- ============================================================ -->
+  <div id="admin-app" class="hidden-page">
+    <div class="d-flex">
+
+      <!-- Sidebar desktop -->
+      <aside class="sidebar d-none d-md-flex flex-column flex-shrink-0 text-white">
+        <div class="p-4 border-bottom d-flex align-items-center gap-3" style="border-color:#1e293b !important">
+          <div class="brand-icon" style="width:42px;height:42px;font-size:1.1rem;background:#4f46e5"><i class="fa-solid fa-graduation-cap"></i></div>
+          <div>
+            <div class="fw-bold lh-sm">Absensi Digital</div>
+            <small class="text-secondary">Panel Admin & Guru</small>
+          </div>
+        </div>
+        <nav id="admin-nav" class="side-nav nav flex-column p-3 gap-1"></nav>
+        <div class="p-3 mt-auto">
+          <a href="#" onclick="handleLogout();return false;" class="nav-link text-danger px-3 py-2"><i class="fa-solid fa-right-from-bracket me-2"></i>Logout</a>
+        </div>
+      </aside>
+
+      <!-- Offcanvas menu mobile -->
+      <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="admin-offcanvas" style="background:#0f172a !important">
+        <div class="offcanvas-header border-bottom" style="border-color:#1e293b !important">
+          <h6 class="offcanvas-title fw-bold"><i class="fa-solid fa-graduation-cap me-2"></i>Absensi Digital</h6>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body d-flex flex-column">
+          <nav id="admin-nav-mobile" class="side-nav nav flex-column gap-1"></nav>
+          <a href="#" onclick="handleLogout();return false;" class="nav-link text-danger px-3 py-2 mt-auto"><i class="fa-solid fa-right-from-bracket me-2"></i>Logout</a>
+        </div>
+      </div>
+
+      <div class="flex-grow-1 d-flex flex-column min-vh-100" style="min-width:0">
+        <header class="bg-white border-bottom px-3 px-md-4 py-3 d-flex align-items-center justify-content-between shadow-sm">
+          <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-light d-md-none" data-bs-toggle="offcanvas" data-bs-target="#admin-offcanvas" aria-label="Menu"><i class="fa-solid fa-bars"></i></button>
+            <h5 id="header-title" class="fw-bold mb-0">Dashboard Overview</h5>
+          </div>
+          <div class="d-flex align-items-center gap-3">
+            <div class="text-end d-none d-sm-block">
+              <div id="user-display-name" class="fw-semibold small">Administrator</div>
+              <div id="user-display-email" class="text-secondary" style="font-size:.75rem"></div>
+            </div>
+            <div class="rounded-circle bg-indigo-soft text-indigo d-flex align-items-center justify-content-center" style="width:40px;height:40px"><i class="fa-solid fa-user-shield"></i></div>
+          </div>
+        </header>
+
+        <main class="p-3 p-md-4 flex-grow-1">
+
+          <!-- ========== DASHBOARD ========== -->
+          <section id="page-dashboard">
+            <div class="row g-3 mb-4">
+              <div class="col-6 col-lg">
+                <div class="card border-0 shadow-sm h-100"><div class="card-body d-flex align-items-center gap-3">
+                  <div class="stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-users"></i></div>
+                  <div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.7rem">Total Siswa</div><div id="dash-total-siswa" class="fs-4 fw-bold">0</div></div>
+                </div></div>
+              </div>
+              <div class="col-6 col-lg">
+                <div class="card border-0 shadow-sm h-100"><div class="card-body d-flex align-items-center gap-3">
+                  <div class="stat-icon bg-success-subtle text-success"><i class="fa-solid fa-user-check"></i></div>
+                  <div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.7rem">Hadir Hari Ini</div><div id="dash-hadir" class="fs-4 fw-bold text-success">0</div></div>
+                </div></div>
+              </div>
+              <div class="col-6 col-lg">
+                <div class="card border-0 shadow-sm h-100"><div class="card-body d-flex align-items-center gap-3">
+                  <div class="stat-icon bg-warning-subtle text-warning"><i class="fa-solid fa-envelope-open-text"></i></div>
+                  <div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.7rem">Izin Hari Ini</div><div id="dash-izin" class="fs-4 fw-bold text-warning">0</div></div>
+                </div></div>
+              </div>
+              <div class="col-6 col-lg">
+                <div class="card border-0 shadow-sm h-100"><div class="card-body d-flex align-items-center gap-3">
+                  <div class="stat-icon bg-indigo-soft text-indigo"><i class="fa-solid fa-notes-medical"></i></div>
+                  <div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.7rem">Sakit Hari Ini</div><div id="dash-sakit" class="fs-4 fw-bold text-indigo">0</div></div>
+                </div></div>
+              </div>
+              <div class="col-12 col-lg">
+                <div class="card border-0 shadow-sm h-100"><div class="card-body d-flex align-items-center gap-3">
+                  <div class="stat-icon bg-danger-subtle text-danger"><i class="fa-solid fa-user-xmark"></i></div>
+                  <div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.7rem">Alfa Hari Ini</div><div id="dash-alfa" class="fs-4 fw-bold text-danger">0</div></div>
+                </div></div>
+              </div>
+            </div>
+
+            <!-- Peta absensi -->
+            <div class="card border-0 shadow-sm mb-4"><div class="card-body p-4">
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <div>
+                  <h6 class="fw-bold mb-0"><i class="fa-solid fa-map-location-dot text-indigo me-2"></i>Peta Lokasi Absensi Siswa</h6>
+                  <small id="dash-map-info" class="text-secondary"></small>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                  <input type="date" id="dash-map-date" onchange="renderDashMap()" class="form-control form-control-sm" style="width:auto">
+                  <button class="btn btn-sm btn-outline-secondary" onclick="$('dash-map-date').value=localDate();renderDashMap()">Hari Ini</button>
+                  <a id="dash-gmaps-link" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-indigo"><i class="fa-brands fa-google me-1"></i>Google Maps</a>
+                </div>
+              </div>
+              <div class="alert alert-primary py-2 small d-flex flex-wrap gap-x-4 gap-3 mb-3" style="background:#eef2ff;border-color:#e0e7ff;color:#4338ca">
+                <span><i class="fa-solid fa-school me-1"></i><b>Titik sekolah:</b> <span id="dash-school-coord"></span></span>
+                <span><i class="fa-solid fa-circle-dot me-1"></i><b>Radius absensi:</b> <span id="dash-school-radius"></span> m</span>
+              </div>
+              <div id="dash-map" class="map-box border"></div>
+              <div class="d-flex flex-wrap gap-3 small text-secondary mt-3">
+                <span><i class="fa-solid fa-school text-indigo"></i> Lokasi sekolah</span>
+                <span><i class="fa-solid fa-circle text-success"></i> Hadir</span>
+                <span><i class="fa-solid fa-circle text-warning"></i> Izin</span>
+                <span><i class="fa-solid fa-circle text-indigo"></i> Sakit</span>
+                <span><i class="fa-solid fa-circle text-danger"></i> Alfa</span>
+              </div>
+            </div></div>
+
+            <!-- Visual lokasi sekolah (satelit) -->
+            <div class="card border-0 shadow-sm mb-4"><div class="card-body p-4">
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <div>
+                  <h6 class="fw-bold mb-0"><i class="fa-solid fa-satellite text-indigo me-2"></i>Visual Lokasi Sekolah</h6>
+                  <small class="text-secondary">Citra dari koordinat <span id="vis-coord"></span></small>
+                </div>
+                <ul class="nav nav-pills gap-1">
+                  <li class="nav-item"><button id="vt-sat" type="button" class="nav-link tab-indigo btn-sm py-1 px-3 active" onclick="setVisualTab('sat')"><i class="fa-solid fa-earth-asia me-1"></i>Satelit</button></li>
+                  <li class="nav-item"><button id="vt-gmaps" type="button" class="nav-link tab-indigo btn-sm py-1 px-3" onclick="setVisualTab('gmaps')"><i class="fa-brands fa-google me-1"></i>Google Maps</button></li>
+                </ul>
+              </div>
+              <div id="vis-sat"><div id="sat-map" class="map-box border"></div></div>
+              <div id="vis-gmaps" class="hidden-page">
+                <iframe id="gmaps-frame" class="gmaps-frame border" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade" title="Google Maps lokasi sekolah"></iframe>
+              </div>
+            </div></div>
+
+            <!-- Aktivitas -->
+            <div class="card border-0 shadow-sm"><div class="card-body p-4">
+              <h6 class="fw-bold mb-3">Aktivitas Absensi Terbaru (Hari Ini)</h6>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 small">
+                  <thead class="table-light text-uppercase"><tr><th>Waktu</th><th>Siswa</th><th>Kelas</th><th>Status</th><th>Lokasi (GPS)</th><th>Jarak</th></tr></thead>
+                  <tbody id="dash-latest-tbody"></tbody>
+                </table>
+              </div>
+            </div></div>
+          </section>
+
+          <!-- ========== DATA SISWA ========== -->
+          <section id="page-siswa" class="hidden-page">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h6 class="fw-bold mb-0">Manajemen Data Siswa</h6>
+              <button onclick="openModalSiswa()" class="btn btn-indigo btn-sm"><i class="fa-solid fa-plus me-1"></i>Tambah Siswa</button>
+            </div>
+            <div class="card border-0 shadow-sm"><div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 small">
+                <thead class="table-light text-uppercase"><tr><th>NISN</th><th>Nama Siswa</th><th>Kelas</th><th>Username</th><th>Password</th><th class="text-center">Aksi</th></tr></thead>
+                <tbody id="siswa-tbody"></tbody>
+              </table>
+            </div></div>
+          </section>
+
+          <!-- ========== DATA KELAS ========== -->
+          <section id="page-kelas" class="hidden-page">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h6 class="fw-bold mb-0">Manajemen Data Kelas</h6>
+              <button onclick="openModalKelas()" class="btn btn-indigo btn-sm"><i class="fa-solid fa-plus me-1"></i>Tambah Kelas</button>
+            </div>
+            <div class="card border-0 shadow-sm"><div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 small">
+                <thead class="table-light text-uppercase"><tr><th>Nama Kelas</th><th>Wali Kelas</th><th class="text-center">Aksi</th></tr></thead>
+                <tbody id="kelas-tbody"></tbody>
+              </table>
+            </div></div>
+          </section>
+
+          <!-- ========== INPUT ABSENSI (ADMIN) ========== -->
+          <section id="page-absensi" class="hidden-page mx-auto" style="max-width:680px">
+            <div class="card border-0 shadow-sm"><div class="card-body p-4">
+              <h6 class="fw-bold pb-3 border-bottom">Input Absensi Siswa (oleh Admin/Guru)</h6>
+              <div class="alert alert-secondary py-2 small"><i class="fa-solid fa-circle-info me-1"></i>Input oleh admin/guru tidak memerlukan izin maupun pengecekan lokasi.</div>
+              <form onsubmit="submitAbsensiAdmin(event)">
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">Pilih Siswa</label>
+                  <select id="adm-siswa-id" required class="form-select"><option value="">-- Pilih Siswa --</option></select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">Status Kehadiran</label>
+                  <select id="adm-status" required class="form-select">
+                    <option value="Hadir">Hadir</option><option value="Izin">Izin</option><option value="Sakit">Sakit</option><option value="Alfa">Alfa</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">Foto Bukti (opsional)</label>
+                  <div class="cam-box d-flex align-items-center justify-content-center">
+                    <span id="adm-cam-status" class="cam-status"></span>
+                    <video id="adm-webcam" autoplay playsinline muted class="hidden-page"></video>
+                    <div id="adm-photo-empty" class="text-center text-secondary small p-3"><i class="fa-solid fa-camera fs-1 d-block mb-2"></i>Belum ada foto</div>
+                    <canvas id="adm-canvas" class="hidden-page"></canvas>
+                    <img id="adm-photo-preview" alt="Preview foto" class="hidden-page">
+                    <input type="file" id="adm-photo-input" accept="image/*" capture="user" class="d-none" onchange="handlePhotoFile('adm-', this)">
+                  </div>
+                  <div class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" onclick="takePhoto('adm-')" class="btn btn-indigo btn-sm"><i class="fa-solid fa-camera me-1"></i>Ambil Foto</button>
+                    <button type="button" onclick="resetPhoto('adm-')" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-rotate-left me-1"></i>Ulangi</button>
+                    <button type="button" data-desktop-only onclick="startCamera('adm-', true)" class="btn btn-outline-secondary btn-sm" title="Nyalakan ulang webcam"><i class="fa-solid fa-video me-1"></i>Webcam</button>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-success w-100 py-2 fw-semibold">Simpan Absensi</button>
+              </form>
+            </div></div>
+          </section>
+
+          <!-- ========== RIWAYAT ========== -->
+          <section id="page-riwayat" class="hidden-page">
+            <div class="card border-0 shadow-sm mb-3"><div class="card-body py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <h6 class="fw-bold mb-0">Riwayat Kehadiran</h6>
+              <div class="d-flex gap-2">
+                <input type="date" id="filter-tanggal" onchange="renderRiwayat()" class="form-control form-control-sm">
+                <button class="btn btn-sm btn-outline-secondary" onclick="$('filter-tanggal').value='';renderRiwayat()">Reset</button>
+              </div>
+            </div></div>
+            <div class="card border-0 shadow-sm"><div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 small">
+                <thead class="table-light text-uppercase"><tr><th>Tanggal & Waktu</th><th>Siswa</th><th>Status</th><th>Lokasi GPS</th><th>Jarak</th><th class="text-center">Foto</th><th class="text-center">Aksi</th></tr></thead>
+                <tbody id="riwayat-tbody"></tbody>
+              </table>
+            </div></div>
+          </section>
+
+          <!-- ========== REKAP ========== -->
+          <section id="page-rekap" class="hidden-page">
+            <div class="card border-0 shadow-sm mb-3"><div class="card-body py-3 d-flex justify-content-between align-items-center">
+              <h6 class="fw-bold mb-0">Rekap Akumulasi Absensi</h6>
+              <button onclick="exportCSV()" class="btn btn-success btn-sm"><i class="fa-solid fa-file-excel me-1"></i>Export CSV</button>
+            </div></div>
+            <div class="card border-0 shadow-sm"><div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 small">
+                <thead class="table-light text-uppercase"><tr>
+                  <th>NISN</th><th>Nama Siswa</th><th>Kelas</th>
+                  <th class="text-center text-success">Hadir</th><th class="text-center text-warning">Izin</th>
+                  <th class="text-center text-indigo">Sakit</th><th class="text-center text-danger">Alfa</th>
+                </tr></thead>
+                <tbody id="rekap-tbody"></tbody>
+              </table>
+            </div></div>
+          </section>
+
+          <!-- ========== PROFIL & PENGATURAN ========== -->
+          <section id="page-profil" class="hidden-page mx-auto" style="max-width:600px">
+            <div class="card border-0 shadow-sm mb-4"><div class="card-body p-4">
+              <h6 class="fw-bold pb-3 border-bottom">Pengaturan Profil Admin</h6>
+              <form onsubmit="saveProfil(event)" autocomplete="off">
+                <div class="mb-3"><label class="form-label small fw-semibold">Nama Pengguna</label><input type="text" id="profil-nama" required class="form-control"></div>
+                <div class="mb-3"><label class="form-label small fw-semibold">Email / Username</label><input type="text" id="profil-email" required class="form-control"></div>
+                <div class="mb-3"><label class="form-label small fw-semibold">Password Baru (Opsional)</label><input type="password" id="profil-pass" autocomplete="new-password" class="form-control" placeholder="Biarkan kosong jika tak diubah"></div>
+                <button type="submit" class="btn btn-indigo w-100">Simpan Perubahan</button>
+              </form>
+            </div></div>
+
+            <div class="card border-0 shadow-sm"><div class="card-body p-4">
+              <h6 class="fw-bold pb-3 border-bottom"><i class="fa-solid fa-location-crosshairs text-indigo me-2"></i>Area Absensi Sekolah</h6>
+              <p class="small">Titik sekolah: <b id="cfg-coord"></b> (<a id="cfg-link" href="#" target="_blank" rel="noopener">lihat di Google Maps</a>)</p>
+              <form onsubmit="saveConfig(event)">
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">Radius maksimal absensi (meter)</label>
+                  <input type="number" id="cfg-radius" min="20" max="5000" step="10" required class="form-control">
+                  <div class="form-text">Siswa yang absen "Hadir" harus berada dalam radius ini. Jika GPS sering kurang akurat, naikkan nilainya.</div>
+                </div>
+                <button type="submit" class="btn btn-indigo w-100">Simpan Radius</button>
+              </form>
+            </div></div>
+          </section>
+
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--                       TAMPILAN SISWA                         -->
+  <!-- ============================================================ -->
+  <div id="student-app" class="hidden-page">
+    <div class="student-shell mx-auto bg-light min-vh-100 d-flex flex-column shadow">
+
+      <header class="std-header text-white px-4 pt-4 pb-5">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center gap-3">
+            <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:46px;height:46px;background:rgba(255,255,255,.2)"><i class="fa-solid fa-user-graduate fs-5"></i></div>
+            <div>
+              <div class="small" style="opacity:.8">Selamat datang,</div>
+              <div id="std-name" class="fw-bold lh-sm">Siswa</div>
+              <div id="std-kelas" class="small" style="opacity:.8"></div>
+            </div>
+          </div>
+          <button onclick="handleLogout()" class="btn btn-sm rounded-circle text-white" style="width:40px;height:40px;background:rgba(255,255,255,.18)" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></button>
+        </div>
+        <div id="std-date" class="small mt-3" style="opacity:.9"></div>
+      </header>
+
+      <main class="px-3 flex-grow-1" style="margin-top:-1.6rem;padding-bottom:5.5rem">
+
+        <!-- BERANDA -->
+        <section id="spage-beranda">
+          <div class="row g-2 mb-3">
+            <div class="col-3"><div class="card border-0 shadow-sm text-center py-2"><div id="std-c-hadir" class="fs-5 fw-bold text-success">0</div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.6rem">Hadir</div></div></div>
+            <div class="col-3"><div class="card border-0 shadow-sm text-center py-2"><div id="std-c-izin" class="fs-5 fw-bold text-warning">0</div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.6rem">Izin</div></div></div>
+            <div class="col-3"><div class="card border-0 shadow-sm text-center py-2"><div id="std-c-sakit" class="fs-5 fw-bold text-indigo">0</div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.6rem">Sakit</div></div></div>
+            <div class="col-3"><div class="card border-0 shadow-sm text-center py-2"><div id="std-c-alfa" class="fs-5 fw-bold text-danger">0</div><div class="text-secondary text-uppercase fw-semibold" style="font-size:.6rem">Alfa</div></div></div>
+          </div>
+
+          <div id="std-done" class="card border-success shadow-sm text-center hidden-page"><div class="card-body p-4">
+            <div class="text-success fs-1 mb-2"><i class="fa-solid fa-circle-check"></i></div>
+            <h6 class="fw-bold">Absensi hari ini sudah tercatat</h6>
+            <p id="std-done-info" class="text-secondary small mb-2"></p>
+            <div id="std-done-status"></div>
+          </div></div>
+
+          <div id="std-form-card" class="card border-0 shadow-sm"><div class="card-body p-3 p-sm-4">
+            <h6 class="fw-bold mb-3"><i class="fa-solid fa-clipboard-check text-success me-2"></i>Absen Hari Ini</h6>
+            <form onsubmit="submitAbsensiSiswa(event)">
+              <div class="mb-3">
+                <label class="form-label small fw-semibold">Status Kehadiran</label>
+                <select id="std-status" onchange="updateStdLocationUI()" class="form-select">
+                  <option value="Hadir">Hadir</option><option value="Izin">Izin</option><option value="Sakit">Sakit</option>
+                </select>
+              </div>
+
+              <div class="mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <span class="small fw-semibold"><i class="fa-solid fa-location-dot text-danger me-1"></i>Lokasi Anda</span>
+                  <span id="std-perm-badge" class="badge text-bg-secondary">Memeriksa izin...</span>
+                </div>
+
+                <!-- Panel minta izin lokasi (tampil otomatis jika belum diizinkan) -->
+                <div id="std-perm-panel" class="alert alert-warning small mb-2 hidden-page">
+                  <!-- Belum diizinkan / GPS mati / sinyal lemah -->
+                  <div id="std-perm-steps">
+                    <div class="fw-semibold mb-1"><i class="fa-solid fa-location-crosshairs me-1"></i>Izinkan akses lokasi</div>
+                    <ol class="ps-3 mb-2">
+                      <li>Aktifkan menu <b>Lokasi / GPS</b> di smartphone (geser layar dari atas, lalu ketuk ikon <b>Lokasi</b>).</li>
+                      <li>Tekan tombol di bawah, lalu pilih <b>Izinkan</b> saat muncul permintaan lokasi.</li>
+                    </ol>
+                    <button type="button" onclick="aktifkanLokasi()" class="btn btn-success btn-sm w-100"><i class="fa-solid fa-location-arrow me-1"></i>Izinkan Lokasi</button>
+                  </div>
+                  <!-- Sudah diblokir: tombol tidak bisa mengubahnya, harus lewat pengaturan -->
+                  <div id="std-perm-denied" class="hidden-page">
+                    <div class="fw-semibold mb-1"><i class="fa-solid fa-ban me-1"></i>Izin lokasi diblokir di browser</div>
+                    <p class="mb-1">Izin yang sudah diblokir tidak bisa diubah lewat tombol. Ubah dulu di pengaturan:</p>
+                    <ol class="ps-3 mb-2">
+                      <li>Ketuk ikon <b>gembok / pengaturan</b> di sebelah kiri alamat situs.</li>
+                      <li>Pilih <b>Izin</b> → <b>Lokasi</b> → <b>Izinkan</b>.</li>
+                      <li>Pastikan juga izin lokasi aplikasi browser aktif: <b>Setelan HP → Aplikasi → Chrome → Izin → Lokasi</b>.</li>
+                      <li>Kembali ke halaman ini, lalu tekan tombol di bawah.</li>
+                    </ol>
+                    <p class="mb-2"><b>iPhone (Safari):</b> Setelan → Privasi &amp; Keamanan → Layanan Lokasi (aktif) → Safari → <i>Saat Menggunakan Aplikasi</i>. Lalu di Safari ketuk <b>aA</b> → Pengaturan Situs Web → Lokasi → <b>Izinkan</b>.</p>
+                    <button type="button" onclick="location.reload()" class="btn btn-success btn-sm w-100"><i class="fa-solid fa-rotate me-1"></i>Muat Ulang Halaman</button>
+                  </div>
+                  <div id="std-perm-help" class="mt-2 text-secondary"></div>
+                </div>
+
+                <div id="std-gps-status" class="small text-secondary fst-italic mb-2">Mencari koordinat...</div>
+                <div id="std-geo-info" class="alert alert-secondary py-2 small mb-2"></div>
+                <div id="std-map" class="map-mini border"></div>
+                <input type="hidden" id="std-lat"><input type="hidden" id="std-lng">
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label small fw-semibold">Foto Selfie</label>
+                <div class="cam-box d-flex align-items-center justify-content-center">
+                  <span id="std-cam-status" class="cam-status"></span>
+                  <video id="std-webcam" autoplay playsinline muted class="hidden-page"></video>
+                  <div id="std-photo-empty" class="text-center text-secondary small p-3"><i class="fa-solid fa-camera fs-1 d-block mb-2"></i>Belum ada foto</div>
+                  <canvas id="std-canvas" class="hidden-page"></canvas>
+                  <img id="std-photo-preview" alt="Preview foto" class="hidden-page">
+                  <input type="file" id="std-photo-input" accept="image/*" capture="user" class="d-none" onchange="handlePhotoFile('std-', this)">
+                </div>
+                <div class="d-flex gap-2 mt-2">
+                  <button type="button" onclick="takePhoto('std-')" class="btn btn-success flex-fill"><i class="fa-solid fa-camera me-1"></i>Ambil Foto</button>
+                  <button type="button" onclick="resetPhoto('std-')" class="btn btn-outline-secondary"><i class="fa-solid fa-rotate-left me-1"></i>Ulangi</button>
+                  <button type="button" data-desktop-only onclick="startCamera('std-', true)" class="btn btn-outline-secondary" title="Nyalakan ulang webcam"><i class="fa-solid fa-video"></i></button>
+                </div>
+                <div class="form-text">HP: kamera bawaan terbuka (tanpa izin kamera). Laptop: webcam otomatis aktif, tinggal tekan Ambil Foto.</div>
+              </div>
+
+              <button type="submit" id="std-submit" class="btn btn-success w-100 py-2 fw-semibold">Kirim Absensi</button>
+            </form>
+          </div></div>
+        </section>
+
+        <!-- RIWAYAT SISWA -->
+        <section id="spage-riwayat" class="hidden-page">
+          <h6 class="fw-bold pt-2 mb-3">Riwayat Absensi Saya</h6>
+          <div id="std-riwayat-list" class="d-grid gap-2"></div>
+        </section>
+
+        <!-- PROFIL SISWA -->
+        <section id="spage-profil" class="hidden-page">
+          <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-3">Data Saya</h6>
+            <dl class="row small mb-0">
+              <dt class="col-4 text-secondary fw-normal">Nama</dt><dd id="sp-nama" class="col-8 text-end fw-semibold"></dd>
+              <dt class="col-4 text-secondary fw-normal">NISN</dt><dd id="sp-nisn" class="col-8 text-end font-monospace"></dd>
+              <dt class="col-4 text-secondary fw-normal">Kelas</dt><dd id="sp-kelas" class="col-8 text-end fw-semibold"></dd>
+              <dt class="col-4 text-secondary fw-normal">Username</dt><dd id="sp-user" class="col-8 text-end font-monospace mb-0"></dd>
+            </dl>
+          </div></div>
+          <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-3">Ganti Password</h6>
+            <form onsubmit="saveProfilSiswa(event)" autocomplete="off">
+              <input type="password" id="sp-old" required autocomplete="new-password" placeholder="Password lama" class="form-control mb-2">
+              <input type="password" id="sp-new" required minlength="4" autocomplete="new-password" placeholder="Password baru (min. 4 karakter)" class="form-control mb-3">
+              <button type="submit" class="btn btn-success w-100">Simpan Password</button>
+            </form>
+          </div></div>
+          <button onclick="handleLogout()" class="btn btn-outline-danger w-100">Logout</button>
+        </section>
+      </main>
+
+      <!-- Menu bawah siswa -->
+      <nav class="fixed-bottom">
+        <div class="student-shell mx-auto bg-white border-top shadow">
+          <div class="row g-0 text-center">
+            <div class="col"><button data-spage="beranda" onclick="switchStudentPage('beranda')" class="snav w-100"><i class="fa-solid fa-house"></i>Beranda</button></div>
+            <div class="col"><button data-spage="riwayat" onclick="switchStudentPage('riwayat')" class="snav w-100"><i class="fa-solid fa-clock-rotate-left"></i>Riwayat</button></div>
+            <div class="col"><button data-spage="profil" onclick="switchStudentPage('profil')" class="snav w-100"><i class="fa-solid fa-user"></i>Profil</button></div>
+          </div>
+        </div>
+      </nav>
+    </div>
+  </div>
+
+  <!-- MODAL SISWA -->
+  <div class="modal fade" id="modal-siswa" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <form class="modal-content border-0 rounded-4" onsubmit="saveSiswa(event)" autocomplete="off">
+        <div class="modal-header border-0 pb-0">
+          <h5 id="modal-siswa-title" class="modal-title fw-bold">Tambah Data Siswa</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="siswa-id">
+          <div class="mb-3"><label class="form-label small fw-semibold text-uppercase">NISN</label><input type="text" id="siswa-nisn" required class="form-control"></div>
+          <div class="mb-3"><label class="form-label small fw-semibold text-uppercase">Nama Lengkap</label><input type="text" id="siswa-nama" required class="form-control"></div>
+          <div class="mb-3"><label class="form-label small fw-semibold text-uppercase">Kelas</label><select id="siswa-kelas" required class="form-select"></select></div>
+          <div class="row g-3">
+            <div class="col-6"><label class="form-label small fw-semibold text-uppercase">Username Login</label><input type="text" id="siswa-username" required class="form-control"></div>
+            <div class="col-6"><label class="form-label small fw-semibold text-uppercase">Password Login</label><input type="text" id="siswa-password" required minlength="4" class="form-control"></div>
+          </div>
+        </div>
+        <div class="modal-footer border-0 pt-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-indigo">Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL KELAS -->
+  <div class="modal fade" id="modal-kelas" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <form class="modal-content border-0 rounded-4" onsubmit="saveKelas(event)">
+        <div class="modal-header border-0 pb-0">
+          <h5 id="modal-kelas-title" class="modal-title fw-bold">Tambah Data Kelas</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="kelas-id">
+          <div class="mb-3"><label class="form-label small fw-semibold text-uppercase">Nama Kelas</label><input type="text" id="kelas-nama" required class="form-control" placeholder="Contoh: X IPA 1"></div>
+          <div class="mb-3"><label class="form-label small fw-semibold text-uppercase">Wali Kelas</label><input type="text" id="kelas-wali" required class="form-control" placeholder="Nama Guru Wali Kelas"></div>
+        </div>
+        <div class="modal-footer border-0 pt-0">
+          <button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-indigo">Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // ============================================================
+    //                   KONFIGURASI LOKASI SEKOLAH
+    // ============================================================
+    // Titik dari: https://www.google.com/maps?q=-7.3656,109.6361
+    const SEKOLAH = {
+      nama: 'Lokasi Sekolah',
+      lat: -7.3656,
+      lng: 109.6361,
+      radius: 100, // meter (bisa diubah admin di Profil & Pengaturan)
+      mapsUrl: 'https://www.google.com/maps?q=-7.3656,109.6361'
+    };
+    // Status yang WAJIB berada di area sekolah saat foto & absen.
+    const STATUS_WAJIB_LOKASI = ['Hadir'];
+    // Lokasi browser hanya berfungsi di https:// atau localhost.
+    // TIDAK berfungsi jika halaman dibuka sebagai file (file://, content:// dari WhatsApp) atau http://alamat-IP.
+    const KONTEKS_LOKASI_OK = location.protocol === 'https:' || ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+
+    // ==================== HELPER ====================
+    const $ = id => document.getElementById(id);
+
+    function loadJSON(key, fallback) {
+      try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
+      catch (e) { return fallback; }
+    }
+    function esc(str) {
+      return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function localDate(d = new Date()) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+    function localTime(d = new Date()) { return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
+
+    function badgeClass(status) {
+      if (status === 'Hadir') return 'text-bg-success';
+      if (status === 'Izin') return 'text-bg-warning';
+      if (status === 'Sakit') return 'text-bg-indigo';
+      return 'text-bg-danger';
+    }
+    const STATUS_COLOR = { Hadir: '#198754', Izin: '#ffc107', Sakit: '#4f46e5', Alfa: '#dc3545' };
+
+    // Notifikasi Bootstrap Toast
+    function notify(msg, type = 'success', delay = 3500) {
+      const el = document.createElement('div');
+      const dark = (type === 'warning' || type === 'light') ? '' : ' btn-close-white';
+      el.className = `toast align-items-center text-bg-${type} border-0`;
+      el.setAttribute('role', 'alert');
+      el.innerHTML = `<div class="d-flex"><div class="toast-body">${esc(msg).replace(/\n/g, '<br>')}</div>
+        <button type="button" class="btn-close${dark} me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+      $('toast-box').appendChild(el);
+      el.addEventListener('hidden.bs.toast', () => el.remove());
+      new bootstrap.Toast(el, { delay }).show();
+    }
+
+    // Konfirmasi Bootstrap Modal (mengembalikan Promise<boolean>)
+    function askConfirm(message, title = 'Konfirmasi', okText = 'Ya', okClass = 'btn-primary') {
+      return new Promise(resolve => {
+        $('cf-title').innerText = title;
+        $('cf-body').innerText = message;
+        const ok = $('cf-ok');
+        ok.innerText = okText;
+        ok.className = 'btn flex-fill ' + okClass;
+        const el = $('modal-confirm');
+        const modal = bootstrap.Modal.getOrCreateInstance(el);
+        let result = false;
+        const onOk = () => { result = true; modal.hide(); };
+        const onHidden = () => {
+          ok.removeEventListener('click', onOk);
+          el.removeEventListener('hidden.bs.modal', onHidden);
+          resolve(result);
+        };
+        ok.addEventListener('click', onOk);
+        el.addEventListener('hidden.bs.modal', onHidden);
+        modal.show();
+      });
+    }
+
+    const showModal = id => bootstrap.Modal.getOrCreateInstance($(id)).show();
+    const hideModal = id => bootstrap.Modal.getOrCreateInstance($(id)).hide();
+
+    // Jarak (meter) - haversine
+    function hitungJarak(lat1, lng1, lat2, lng2) {
+      const R = 6371000, toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    }
+    function jarakKeSekolah(lat, lng) {
+      if (lat === '' || lat == null || lng === '' || lng == null) return null;
+      return hitungJarak(Number(lat), Number(lng), SEKOLAH.lat, SEKOLAH.lng);
+    }
+    function fmtJarak(m) {
+      if (m == null) return '-';
+      return m >= 1000 ? (m / 1000).toFixed(2) + ' km' : Math.round(m) + ' m';
+    }
+
+    // ==================== DATA ====================
+    let currentUser = loadJSON('user_session', null);
+    let auth = loadJSON('db_auth', { nama: 'Administrator', email: 'admin@school.id', password: 'admin123' });
+    let config = loadJSON('db_config', {});
+    if (Number(config.radius) > 0) SEKOLAH.radius = Number(config.radius);
+
+    let dataKelas = loadJSON('db_kelas', [
+      { id: 'K1', nama: 'X IPA 1', wali: 'Drs. Budi Santoso' },
+      { id: 'K2', nama: 'X IPS 2', wali: 'Siti Rahma, S.Pd' }
+    ]);
+    let dataSiswa = loadJSON('db_siswa', [
+      { id: 'S1', nisn: '10012', nama: 'Ahmad Rizky', kelas: 'X IPA 1', username: '10012', password: 'siswa123' },
+      { id: 'S2', nisn: '10013', nama: 'Dewi Lestari', kelas: 'X IPS 2', username: '10013', password: 'siswa123' }
+    ]);
+    let dataAbsensi = loadJSON('db_absensi', []);
+
+    dataSiswa.forEach(s => {
+      if (!s.username) s.username = s.nisn;
+      if (!s.password) s.password = 'siswa123';
+    });
+
+    function syncStorage() {
+      try {
+        localStorage.setItem('db_auth', JSON.stringify(auth));
+        localStorage.setItem('db_config', JSON.stringify(config));
+        localStorage.setItem('db_kelas', JSON.stringify(dataKelas));
+        localStorage.setItem('db_siswa', JSON.stringify(dataSiswa));
+        localStorage.setItem('db_absensi', JSON.stringify(dataAbsensi));
+      } catch (e) {
+        notify('Penyimpanan browser penuh. Hapus beberapa riwayat absensi (terutama yang berfoto).', 'danger', 6000);
+      }
+    }
+
+    // ==================== INIT ====================
+    window.addEventListener('DOMContentLoaded', () => {
+      syncStorage();
+      renderAdminMenu();
+      if (!KONTEKS_LOKASI_OK) $('proto-warn').classList.remove('d-none');
+      if (IS_MOBILE) document.querySelectorAll('[data-desktop-only]').forEach(el => el.classList.add('hidden-page'));
+      setLoginRole('admin');
+      enterApp();
+    });
+
+    function enterApp() {
+      if (!currentUser) return showLoginPage();
+      if (currentUser.role === 'admin') return showAdminApp();
+      if (currentUser.role === 'siswa' && dataSiswa.some(s => s.id === currentUser.siswaId)) return showStudentApp();
+      handleLogout();
+    }
+
+    // ==================== LOGIN ====================
+    let loginRole = 'admin';
+    function setLoginRole(role) {
+      loginRole = role;
+      $('tab-admin').className = 'nav-link tab-indigo' + (role === 'admin' ? ' active' : ' text-secondary');
+      $('tab-siswa').className = 'nav-link' + (role === 'siswa' ? ' active bg-success' : ' text-secondary');
+      $('login-btn').className = 'btn w-100 py-2 fw-semibold ' + (role === 'admin' ? 'btn-indigo' : 'btn-success');
+      $('login-user-label').innerText = role === 'admin' ? 'Username / Email Admin' : 'Username Siswa';
+      $('login-alert').classList.add('d-none');
+    }
+
+    function handleLogin(e) {
+      e.preventDefault();
+      const u = $('login-user').value.trim();
+      const p = $('login-pass').value;
+      let ok = false;
+
+      if (loginRole === 'admin') {
+        if ((u === 'admin' || u === auth.email) && p === auth.password) {
+          currentUser = { role: 'admin', nama: auth.nama, email: auth.email };
+          ok = true;
+        }
+      } else {
+        const s = dataSiswa.find(x => x.username === u && x.password === p);
+        if (s) { currentUser = { role: 'siswa', siswaId: s.id }; ok = true; }
+      }
+
+      if (ok) {
+        localStorage.setItem('user_session', JSON.stringify(currentUser));
+        $('login-alert').classList.add('d-none');
+        $('form-login').reset();
+        enterApp();
+      } else {
+        $('login-alert').classList.remove('d-none');
+      }
+    }
+
+    function handleLogout() {
+      stopStdWatch();
+      stopCamera();
+      localStorage.removeItem('user_session');
+      currentUser = null;
+      showLoginPage();
+    }
+
+    function showLoginPage() {
+      $('page-login').classList.remove('hidden-page');
+      $('admin-app').classList.add('hidden-page');
+      $('student-app').classList.add('hidden-page');
+    }
+
+    // ============================================================
+    //                  FOTO · GPS · PETA
+    // ============================================================
+    // ===== FOTO =====
+    // HP/tablet : kamera bawaan perangkat lewat <input capture> (tanpa izin kamera browser)
+    // Laptop/PC : webcam langsung aktif, tinggal tekan "Ambil Foto" (browser meminta izin kamera 1x)
+    const FOTO_MAKS_UMUR_MENIT = 10; // foto dari file/galeri ditolak jika lebih lama dari ini (0 = nonaktif)
+    const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    let photoData = { 'adm-': null, 'std-': null };
+    let stdMap = null, stdSchoolLayer = null, stdMarker = null;
+    let stdPos = null;
+
+    let mediaStream = null, camWanted = null, camToken = 0, camState = 'off'; // off | starting | live | failed
+
+    const statusWajibLokasi = s => STATUS_WAJIB_LOKASI.includes(s);
+    const camActive = () => !!(mediaStream && mediaStream.active && mediaStream.getVideoTracks().some(t => t.readyState === 'live'));
+
+    function setCamStatus(p, text, type = 'success') {
+      const el = $(p + 'cam-status');
+      if (!el) return;
+      if (!text) { el.innerHTML = ''; return; }
+      const dot = type === 'success' ? '<span class="cam-dot"></span>' : '';
+      el.innerHTML = `<span class="badge text-bg-${type}">${dot}${esc(text)}</span>`;
+    }
+
+    // Menampilkan salah satu: foto hasil / video live / placeholder
+    function refreshPhotoView(p) {
+      const hasPhoto = !!photoData[p];
+      const live = !hasPhoto && camState === 'live' && camWanted === p;
+      $(p + 'photo-preview').classList.toggle('hidden-page', !hasPhoto);
+      $(p + 'webcam').classList.toggle('hidden-page', !live);
+      $(p + 'photo-empty').classList.toggle('hidden-page', hasPhoto || live);
+    }
+
+    function stopTracks() {
+      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      ['adm-webcam', 'std-webcam'].forEach(id => { const v = $(id); if (v) v.srcObject = null; });
+    }
+    function stopCamera() {
+      camToken++;
+      camWanted = null;
+      camState = 'off';
+      stopTracks();
+      setCamStatus('adm-', ''); setCamStatus('std-', '');
+      ['adm-', 'std-'].forEach(p => refreshPhotoView(p));
+    }
+
+    // Menyalakan webcam (hanya laptop/PC). Di HP dipakai kamera bawaan lewat input capture.
+    async function startCamera(p, force = false) {
+      if (IS_MOBILE) { camWanted = null; refreshPhotoView(p); return false; }
+      camWanted = p;
+      if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        camState = 'failed';
+        setCamStatus(p, 'Webcam tidak tersedia (perlu HTTPS/localhost)', 'warning');
+        refreshPhotoView(p);
+        return false;
+      }
+      if (!force && camState === 'live' && camActive() && $(p + 'webcam').srcObject === mediaStream) {
+        refreshPhotoView(p);
+        return true;
+      }
+      stopTracks();
+      const my = ++camToken;
+      camState = 'starting';
+      setCamStatus(p, 'Menyalakan kamera...', 'secondary');
+      refreshPhotoView(p);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+        if (my !== camToken) { stream.getTracks().forEach(t => t.stop()); return false; } // sudah pindah halaman
+        mediaStream = stream;
+        stream.getVideoTracks()[0].addEventListener('ended', () => {
+          if (my === camToken) { camState = 'failed'; setCamStatus(p, 'Kamera terputus', 'warning'); refreshPhotoView(p); }
+        });
+        const video = $(p + 'webcam');
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+        camState = 'live';
+        setCamStatus(p, 'Kamera aktif');
+        refreshPhotoView(p);
+        return true;
+      } catch (err) {
+        if (my === camToken) {
+          mediaStream = null;
+          camState = 'failed';
+          const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+          setCamStatus(p, denied ? 'Izin kamera ditolak' : 'Webcam tidak ditemukan', 'danger');
+          notify(denied
+            ? 'Izin webcam ditolak. Izinkan kamera di browser lalu tekan tombol Webcam, atau pilih foto dari file.'
+            : 'Webcam gagal dinyalakan: ' + (err.message || err), 'danger', 6000);
+          refreshPhotoView(p);
+        }
+        return false;
+      }
+    }
+
+    // Webcam menyala lagi otomatis saat tab browser kembali aktif
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && camWanted && !IS_MOBILE && !camActive() && camState !== 'failed') startCamera(camWanted, true);
+    });
+
+    // Ulangi: buang foto → preview webcam langsung tampil lagi (stream tetap menyala)
+    function resetPhoto(p) {
+      photoData[p] = null;
+      $(p + 'photo-preview').removeAttribute('src');
+      $(p + 'photo-input').value = '';
+      refreshPhotoView(p);
+      if (!IS_MOBILE && camWanted === p && !(camState === 'live' && camActive())) startCamera(p, true);
+    }
+
+    // Cek area (siswa)
+    function cekAreaSiswa() {
+      if (!stdPos) return { ok: false, msg: 'Lokasi belum terdeteksi. Aktifkan menu Lokasi di smartphone dan izinkan akses lokasi.' };
+      const d = hitungJarak(stdPos.lat, stdPos.lng, SEKOLAH.lat, SEKOLAH.lng);
+      if (d > SEKOLAH.radius) return { ok: false, jarak: d, msg: `Anda berada ${fmtJarak(d)} dari sekolah. Batas maksimal ${SEKOLAH.radius} m.` };
+      return { ok: true, jarak: d };
+    }
+
+    // Foto Hadir hanya diblokir jika lokasi SUDAH terbaca dan terbukti di luar area sekolah.
+    // Jika lokasi belum terbaca, foto tetap boleh diambil; lokasi diverifikasi ulang saat Kirim.
+    function blokirJikaDiLuarArea(p) {
+      if (p !== 'std-' || !statusWajibLokasi($('std-status').value)) return false;
+      if (!stdPos) {
+        notify('Lokasi belum terbaca. Foto tetap bisa diambil, lokasi diverifikasi saat Kirim Absensi.', 'info', 3500);
+        return false;
+      }
+      const c = cekAreaSiswa();
+      if (!c.ok) {
+        notify('Pengambilan foto absensi hanya dapat dilakukan di area sekolah.\n' + c.msg, 'danger', 5500);
+        return true;
+      }
+      return false;
+    }
+
+    function takePhoto(p) {
+      if (blokirJikaDiLuarArea(p)) return;
+      if (!IS_MOBILE) {
+        if (camState === 'live' && camActive()) { ambilDariWebcam(p); return; }      // laptop: jepret langsung
+        if (camState === 'starting') { notify('Webcam sedang dinyalakan, tunggu sebentar...', 'info', 2500); return; }
+        notify('Webcam tidak aktif. Pilih foto lewat jendela berikut.', 'info', 3000);
+      }
+      const input = $(p + 'photo-input');   // HP: kamera bawaan; laptop tanpa webcam: pilih file
+      input.value = '';
+      input.click();
+    }
+
+    function ambilDariWebcam(p) {
+      const video = $(p + 'webcam');
+      if (!video.videoWidth) { notify('Webcam belum siap, coba lagi sebentar lagi.', 'warning'); return; }
+      const canvas = $(p + 'canvas');
+      const scale = Math.min(1, 320 / video.videoWidth);
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.translate(canvas.width, 0); ctx.scale(-1, 1);          // samakan dengan preview cermin
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      photoData[p] = canvas.toDataURL('image/jpeg', 0.6);
+      $(p + 'photo-preview').src = photoData[p];
+      refreshPhotoView(p);
+      notify('Foto berhasil diambil.', 'success', 1800);
+    }
+
+    // Foto dari kamera bawaan HP / file
+    function handlePhotoFile(p, input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) { notify('File harus berupa gambar.', 'danger'); input.value = ''; return; }
+
+      if (p === 'std-' && FOTO_MAKS_UMUR_MENIT > 0 && file.lastModified > 0) {
+        const umurMenit = (Date.now() - file.lastModified) / 60000;
+        if (umurMenit > FOTO_MAKS_UMUR_MENIT) {
+          notify('Foto harus diambil langsung saat absen (bukan dari galeri).', 'danger', 5000);
+          input.value = '';
+          return;
+        }
+      }
+
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = $(p + 'canvas');
+        const scale = Math.min(1, 320 / img.width);
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        photoData[p] = canvas.toDataURL('image/jpeg', 0.6);
+        $(p + 'photo-preview').src = photoData[p];
+        refreshPhotoView(p);
+        URL.revokeObjectURL(url);
+        notify('Foto berhasil diambil.', 'success', 1800);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); notify('Foto tidak dapat dibaca. Coba ambil ulang.', 'danger'); };
+      img.src = url;
+    }
+
+    // ---------- GPS ----------
+    function ambilPosisi() {
+      return new Promise((resolve, reject) => {
+        if (!KONTEKS_LOKASI_OK) return reject({ code: 4, message: 'insecure' });
+        if (!navigator.geolocation) return reject(new Error('Geolocation tidak didukung oleh browser Anda.'));
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy }),
+          err => reject(err),
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+      });
+    }
+    function pesanErrorGPS(err) {
+      if (err && err.code === 4) return 'Halaman dibuka dari file/alamat tidak aman (bukan https://), sehingga lokasi diblokir browser.';
+      if (err && err.code === 1) return 'Izin lokasi ditolak. Izinkan akses lokasi pada browser.';
+      if (err && err.code === 3) return 'Waktu pencarian lokasi habis. Coba lagi.';
+      return 'Gagal mendapatkan lokasi. Pastikan GPS aktif & buka lewat localhost/HTTPS.';
+    }
+
+    // ---------- Izin & pelacakan lokasi (siswa) ----------
+    // Lokasi diminta otomatis saat form absen tampil dan dipantau terus (watchPosition),
+    // jadi siswa cukup mengaktifkan menu Lokasi di smartphone lalu memilih "Izinkan".
+    let stdWatchId = null, stdPermObj = null, stdUiState = 'checking';
+
+    function setPermUI(state) {
+      stdUiState = state;
+      const cfg = {
+        checking: ['secondary', 'Memeriksa izin...'],
+        granted:  ['success', 'Lokasi diizinkan'],
+        prompt:   ['warning', 'Belum diizinkan'],
+        denied:   ['danger', 'Lokasi diblokir'],
+        off:      ['warning', 'GPS belum aktif'],
+        insecure: ['danger', 'Halaman tidak aman'],
+        timeout:  ['warning', 'Sinyal GPS lemah']
+      }[state] || ['secondary', '...'];
+      const badge = $('std-perm-badge');
+      badge.className = 'badge text-bg-' + cfg[0];
+      badge.innerHTML = (state === 'granted' ? '<i class="fa-solid fa-circle-check me-1"></i>' : '') + cfg[1];
+
+      const showPanel = !(state === 'granted' || state === 'checking');
+      $('std-perm-panel').classList.toggle('hidden-page', !showPanel);
+      $('std-perm-steps').classList.toggle('hidden-page', !['prompt', 'off', 'timeout'].includes(state));
+      $('std-perm-denied').classList.toggle('hidden-page', state !== 'denied');
+      $('std-perm-help').className = 'mt-2 ' + (state === 'insecure' ? 'text-danger fw-semibold' : 'text-secondary');
+      $('std-perm-help').innerText = {
+        insecure: 'Halaman ini dibuka dari file atau alamat yang tidak aman (mis. file yang dikirim lewat WhatsApp / content:// atau http://alamat-IP), sehingga browser memblokir lokasi walau GPS dan izin sudah aktif. Buka aplikasi lewat link HTTPS hasil hosting, bukan lewat file.',
+        off: 'Lokasi/GPS perangkat belum aktif. Aktifkan menu Lokasi di smartphone, lalu tekan tombol di atas.',
+        timeout: 'Sinyal GPS belum didapat. Pindah ke tempat yang lebih terbuka, lalu tunggu atau tekan tombol di atas.'
+      }[state] || '';
+    }
+
+    function setPermFromError(err) {
+      if (err && err.code === 4) setPermUI('insecure');
+      else if (err && err.code === 1) setPermUI('denied');
+      else if (err && err.code === 3) setPermUI('timeout');
+      else setPermUI('off');
+    }
+
+    function onStdPos(pos) {
+      stdPos = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+      $('std-lat').value = stdPos.lat;
+      $('std-lng').value = stdPos.lng;
+      $('std-gps-status').innerText = `Lat: ${stdPos.lat.toFixed(5)}, Lng: ${stdPos.lng.toFixed(5)} (akurasi ±${Math.round(stdPos.acc)} m)`;
+      setPermUI('granted');
+      showStdMap(stdPos.lat, stdPos.lng);
+      updateStdLocationUI();
+    }
+
+    function onStdPosError(err) {
+      stdPos = null;
+      $('std-lat').value = '';
+      $('std-lng').value = '';
+      if (stdMarker) { stdMarker.remove(); stdMarker = null; }
+      $('std-gps-status').innerText = pesanErrorGPS(err);
+      setPermFromError(err);
+      if (err && err.code === 1) stopStdWatch();   // ditolak: pantauan berhenti, menunggu izin diberikan
+      updateStdLocationUI();
+    }
+
+    function startStdWatch() {
+      stopStdWatch();
+      if (!KONTEKS_LOKASI_OK) {
+        stdPos = null;
+        $('std-gps-status').innerText = 'Lokasi diblokir: halaman dibuka dari file/alamat tidak aman (bukan https://).';
+        setPermUI('insecure');
+        updateStdLocationUI();
+        return;
+      }
+      if (!navigator.geolocation) {
+        $('std-gps-status').innerText = 'Geolocation tidak didukung oleh browser Anda.';
+        setPermUI('off');
+        updateStdLocationUI();
+        return;
+      }
+      $('std-gps-status').innerText = 'Mencari lokasi GPS...';
+      // Fix cepat (akurasi kasar) agar status tidak menggantung menunggu GPS presisi
+      navigator.geolocation.getCurrentPosition(pos => { if (!stdPos) onStdPos(pos); }, () => {},
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+      // Pantauan presisi tinggi (terus diperbarui)
+      stdWatchId = navigator.geolocation.watchPosition(onStdPos, onStdPosError,
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 });
+    }
+
+    function stopStdWatch() {
+      if (stdWatchId != null && navigator.geolocation) navigator.geolocation.clearWatch(stdWatchId);
+      stdWatchId = null;
+    }
+
+    // Tombol "Izinkan Lokasi" (aksi klik pengguna → memicu permintaan izin bawaan smartphone)
+    function aktifkanLokasi() {
+      $('std-gps-status').innerText = 'Meminta izin lokasi...';
+      setPermUI('checking');
+      startStdWatch();
+    }
+
+    // Memantau perubahan izin lokasi (mis. siswa baru mengizinkan lewat pengaturan)
+    async function pantauIzinLokasi() {
+      if (!navigator.permissions || !navigator.permissions.query) return;
+      try {
+        const st = await navigator.permissions.query({ name: 'geolocation' });
+        stdPermObj = st;
+        const apply = initial => {
+          if (stdUiState === 'insecure') return;
+          if (st.state === 'granted') {
+            if (['checking', 'prompt', 'denied', 'granted'].includes(stdUiState)) setPermUI('granted');
+            if (!initial && stdWatchId == null) startStdWatch();
+          } else if (st.state === 'denied') {
+            stopStdWatch();
+            setPermUI('denied');
+          } else if (stdUiState === 'checking') {
+            setPermUI('prompt');
+          }
+        };
+        apply(true);
+        st.onchange = () => apply(false);
+      } catch (e) { /* browser tidak mendukung Permissions API untuk lokasi */ }
+    }
+
+    // ---------- Peta (Leaflet) ----------
+    const TILE_OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    const TILE_SAT = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    const makeOSM = () => L.tileLayer(TILE_OSM, { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' });
+    const makeSat = () => L.tileLayer(TILE_SAT, { maxZoom: 19, maxNativeZoom: 18, attribution: 'Tiles &copy; Esri &mdash; Maxar, Earthstar Geographics, GIS User Community' });
+
+    function leafletReady(el) {
+      if (typeof L === 'undefined') {
+        el.innerHTML = '<div class="h-100 d-flex align-items-center justify-content-center small text-secondary p-3 text-center">Peta gagal dimuat. Periksa koneksi internet.</div>';
+        return false;
+      }
+      return true;
+    }
+    function schoolIcon() {
+      return L.divIcon({
+        className: '',
+        html: '<div style="width:34px;height:34px;border-radius:50%;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"><i class="fa-solid fa-school"></i></div>',
+        iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -18]
+      });
+    }
+    function gambarSekolah(layer, warnaCircle = '#4f46e5') {
+      const circle = L.circle([SEKOLAH.lat, SEKOLAH.lng], { radius: SEKOLAH.radius, color: warnaCircle, weight: 2, fillColor: warnaCircle, fillOpacity: 0.12 }).addTo(layer);
+      L.marker([SEKOLAH.lat, SEKOLAH.lng], { icon: schoolIcon() }).addTo(layer)
+        .bindPopup(`<b>${esc(SEKOLAH.nama)}</b><br><span style="font-size:12px">Radius absensi ${SEKOLAH.radius} m</span><br>
+          <a href="${SEKOLAH.mapsUrl}" target="_blank" rel="noopener" style="font-size:12px">Buka di Google Maps</a>`);
+      return circle;
+    }
+
+    function initStdMap() {
+      const el = $('std-map');
+      if (!leafletReady(el)) return;
+      if (!stdMap) {
+        stdMap = L.map(el).setView([SEKOLAH.lat, SEKOLAH.lng], 17);
+        makeOSM().addTo(stdMap);
+        stdSchoolLayer = L.layerGroup().addTo(stdMap);
+      }
+      stdSchoolLayer.clearLayers();
+      const circle = gambarSekolah(stdSchoolLayer);
+      setTimeout(() => {
+        stdMap.invalidateSize();
+        if (!stdMarker) stdMap.fitBounds(circle.getBounds(), { padding: [10, 10] });
+      }, 80);
+    }
+
+    function showStdMap(lat, lng, fit = false) {
+      if (!stdMap) initStdMap();
+      if (!stdMap) return;
+      if (stdMarker) {
+        stdMarker.setLatLng([lat, lng]);
+      } else {
+        stdMarker = L.circleMarker([lat, lng], { radius: 9, color: '#fff', weight: 2, fillColor: '#10b981', fillOpacity: 0.95 }).addTo(stdMap).bindPopup('Lokasi Anda');
+        fit = true;
+      }
+      if (fit) {
+        const b = L.latLngBounds([[lat, lng], [SEKOLAH.lat, SEKOLAH.lng]]).extend(
+          L.circle([SEKOLAH.lat, SEKOLAH.lng], { radius: SEKOLAH.radius }).getBounds());
+        setTimeout(() => { stdMap.invalidateSize(); stdMap.fitBounds(b, { padding: [25, 25], maxZoom: 18 }); }, 100);
+      }
+    }
+
+    function updateStdLocationUI() {
+      const box = $('std-geo-info');
+      if (!box) return;
+      const wajib = statusWajibLokasi($('std-status').value);
+      let cls, html;
+      if (!stdPos) {
+        cls = wajib ? 'alert-danger' : 'alert-secondary';
+        html = wajib
+          ? '<i class="fa-solid fa-triangle-exclamation me-1"></i>Lokasi belum terdeteksi. Absensi <b>Hadir</b> wajib di area sekolah — aktifkan menu Lokasi di smartphone lalu izinkan akses lokasi.'
+          : '<i class="fa-solid fa-location-crosshairs me-1"></i>Lokasi belum terdeteksi (opsional untuk status ini).';
+      } else {
+        const d = hitungJarak(stdPos.lat, stdPos.lng, SEKOLAH.lat, SEKOLAH.lng);
+        if (d <= SEKOLAH.radius) {
+          cls = 'alert-success';
+          html = `<i class="fa-solid fa-circle-check me-1"></i>Anda <b>berada di area sekolah</b> (${fmtJarak(d)} dari titik sekolah, batas ${SEKOLAH.radius} m).`;
+        } else if (wajib) {
+          cls = 'alert-danger';
+          html = `<i class="fa-solid fa-ban me-1"></i>Anda <b>di luar area sekolah</b> (${fmtJarak(d)}; batas ${SEKOLAH.radius} m). Foto & absensi <b>Hadir</b> hanya bisa dilakukan di sekolah.`;
+        } else {
+          cls = 'alert-warning';
+          html = `<i class="fa-solid fa-circle-info me-1"></i>Anda di luar area sekolah (${fmtJarak(d)}). Untuk status ini absensi tetap diperbolehkan.`;
+        }
+      }
+      box.className = 'alert py-2 small mb-2 ' + cls;
+      box.innerHTML = html;
+    }
+
+    // ============================================================
+    //                        TAMPILAN ADMIN
+    // ============================================================
+    const ADMIN_MENU = [
+      ['dashboard', 'fa-chart-pie', 'Dashboard'],
+      ['siswa', 'fa-user-graduate', 'Data Siswa'],
+      ['kelas', 'fa-door-open', 'Data Kelas'],
+      ['absensi', 'fa-camera', 'Input Absensi'],
+      ['riwayat', 'fa-clock-rotate-left', 'Riwayat Absensi'],
+      ['rekap', 'fa-file-invoice', 'Rekap Absensi'],
+      ['profil', 'fa-user-gear', 'Profil & Pengaturan']
+    ];
+    const PAGES = ADMIN_MENU.map(m => m[0]);
+    const TITLES = {
+      dashboard: 'Dashboard Overview', siswa: 'Data Siswa', kelas: 'Data Kelas & Wali Kelas',
+      absensi: 'Input Absensi', riwayat: 'Riwayat Kehadiran Siswa', rekap: 'Rekap Laporan Absensi', profil: 'Profil & Pengaturan'
+    };
+
+    function renderAdminMenu() {
+      const html = ADMIN_MENU.map(([id, ic, label]) =>
+        `<a href="#" data-page="${id}" onclick="switchPage('${id}');return false;" class="nav-link d-flex align-items-center gap-3">
+           <i class="fa-solid ${ic}" style="width:20px"></i>${label}</a>`).join('');
+      $('admin-nav').innerHTML = html;
+      $('admin-nav-mobile').innerHTML = html;
+    }
+
+    function showAdminApp() {
+      $('page-login').classList.add('hidden-page');
+      $('student-app').classList.add('hidden-page');
+      $('admin-app').classList.remove('hidden-page');
+      $('user-display-name').innerText = currentUser.nama;
+      $('user-display-email').innerText = currentUser.email;
+      switchPage('dashboard');
+    }
+
+    function switchPage(pageId) {
+      if (pageId !== 'absensi') stopCamera();
+      const oc = bootstrap.Offcanvas.getInstance($('admin-offcanvas'));
+      if (oc) oc.hide();
+
+      PAGES.forEach(p => $('page-' + p).classList.add('hidden-page'));
+      $('page-' + pageId).classList.remove('hidden-page');
+      document.querySelectorAll('#admin-app [data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === pageId));
+      $('header-title').innerText = TITLES[pageId];
+
+      if (pageId === 'dashboard') renderDashboard();
+      if (pageId === 'siswa') renderSiswa();
+      if (pageId === 'kelas') renderKelas();
+      if (pageId === 'absensi') prepareAbsensiAdmin();
+      if (pageId === 'riwayat') renderRiwayat();
+      if (pageId === 'rekap') renderRekap();
+      if (pageId === 'profil') prepareProfil();
+    }
+
+    // ---------- Dashboard ----------
+    let dashMap = null, dashLayer = null;
+    let satMap = null, satLayer = null;
+    let visualTab = 'sat';
+
+    function jarakRecord(a) { return a.jarak != null ? a.jarak : jarakKeSekolah(a.lat, a.lng); }
+
+    function renderDashboard() {
+      const today = localDate();
+      const todayAbsensi = dataAbsensi.filter(a => a.tanggal === today);
+
+      $('dash-total-siswa').innerText = dataSiswa.length;
+      $('dash-hadir').innerText = todayAbsensi.filter(a => a.status === 'Hadir').length;
+      $('dash-izin').innerText = todayAbsensi.filter(a => a.status === 'Izin').length;
+      $('dash-sakit').innerText = todayAbsensi.filter(a => a.status === 'Sakit').length;
+      $('dash-alfa').innerText = todayAbsensi.filter(a => a.status === 'Alfa').length;
+
+      const tbody = $('dash-latest-tbody');
+      tbody.innerHTML = todayAbsensi.length === 0
+        ? `<tr><td colspan="6" class="text-center text-secondary py-4">Belum ada absensi untuk hari ini</td></tr>`
+        : todayAbsensi.slice(-5).reverse().map(a => `
+          <tr>
+            <td class="fw-semibold">${esc(a.waktu)}</td>
+            <td>${esc(a.namaSiswa)}</td>
+            <td>${esc(a.kelas)}</td>
+            <td><span class="badge rounded-pill ${badgeClass(a.status)}">${esc(a.status)}</span></td>
+            <td class="text-secondary">${a.lat ? `${Number(a.lat).toFixed(5)}, ${Number(a.lng).toFixed(5)}` : 'Tidak ada'}</td>
+            <td class="text-secondary">${fmtJarak(jarakRecord(a))}</td>
+          </tr>`).join('');
+
+      if (!$('dash-map-date').value) $('dash-map-date').value = today;
+      renderDashMap();
+      setVisualTab(visualTab);
+    }
+
+    function renderDashMap() {
+      $('dash-gmaps-link').href = SEKOLAH.mapsUrl;
+      $('dash-school-coord').innerText = `${SEKOLAH.lat}, ${SEKOLAH.lng}`;
+      $('dash-school-radius').innerText = SEKOLAH.radius;
+
+      const el = $('dash-map');
+      if (!leafletReady(el)) return;
+
+      if (!dashMap) {
+        dashMap = L.map(el).setView([SEKOLAH.lat, SEKOLAH.lng], 17);
+        const osm = makeOSM().addTo(dashMap);
+        const sat = makeSat();
+        L.control.layers({ 'Peta': osm, 'Satelit': sat }, null, { position: 'topright' }).addTo(dashMap);
+        dashLayer = L.layerGroup().addTo(dashMap);
+      }
+      dashLayer.clearLayers();
+
+      const circle = gambarSekolah(dashLayer);
+      const bounds = circle.getBounds();
+
+      const tgl = $('dash-map-date').value || localDate();
+      const list = dataAbsensi.filter(a => a.tanggal === tgl && a.lat && a.lng);
+
+      list.forEach(a => {
+        const ll = [Number(a.lat), Number(a.lng)];
+        bounds.extend(ll);
+        const j = jarakRecord(a);
+        const luar = j != null && j > SEKOLAH.radius;
+        const popup = `
+          <div style="min-width:140px">
+            <b>${esc(a.namaSiswa)}</b><br>
+            <span style="font-size:12px">${esc(a.kelas)}</span><br>
+            <span style="font-size:12px;color:${STATUS_COLOR[a.status] || '#000'};font-weight:600">${esc(a.status)}</span>
+            <span style="font-size:12px"> • ${esc(a.waktu)}</span><br>
+            <span style="font-size:12px;color:${luar ? '#dc3545' : '#198754'}">${fmtJarak(j)} dari sekolah${luar ? ' (di luar area)' : ''}</span>
+            ${a.foto ? `<br><img src="${a.foto}" style="width:110px;margin-top:6px;border-radius:8px">` : ''}
+          </div>`;
+        L.circleMarker(ll, { radius: 9, color: '#fff', weight: 2, fillColor: STATUS_COLOR[a.status] || '#64748b', fillOpacity: 0.95 })
+          .addTo(dashLayer).bindPopup(popup);
+      });
+
+      setTimeout(() => { dashMap.invalidateSize(); dashMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 }); }, 100);
+
+      $('dash-map-info').innerText = list.length
+        ? `${list.length} titik lokasi absensi pada ${tgl}`
+        : `Belum ada absensi berlokasi pada ${tgl}`;
+    }
+
+    // ---------- Visual lokasi sekolah (Satelit / Google Maps) ----------
+    function setVisualTab(tab) {
+      visualTab = tab;
+      $('vis-coord').innerText = `${SEKOLAH.lat}, ${SEKOLAH.lng}`;
+      $('vt-sat').classList.toggle('active', tab === 'sat');
+      $('vt-gmaps').classList.toggle('active', tab === 'gmaps');
+      $('vis-sat').classList.toggle('hidden-page', tab !== 'sat');
+      $('vis-gmaps').classList.toggle('hidden-page', tab !== 'gmaps');
+
+      if (tab === 'sat') initSatMap();
+      else {
+        const frame = $('gmaps-frame');
+        const src = `https://www.google.com/maps?q=${SEKOLAH.lat},${SEKOLAH.lng}&z=18&t=k&output=embed`;
+        if (frame.getAttribute('src') !== src) frame.setAttribute('src', src);
+      }
+    }
+
+    function initSatMap() {
+      const el = $('sat-map');
+      if (!leafletReady(el)) return;
+      if (!satMap) {
+        satMap = L.map(el).setView([SEKOLAH.lat, SEKOLAH.lng], 18);
+        makeSat().addTo(satMap);
+        satLayer = L.layerGroup().addTo(satMap);
+      }
+      satLayer.clearLayers();
+      const circle = gambarSekolah(satLayer, '#ffffff');
+      setTimeout(() => { satMap.invalidateSize(); satMap.fitBounds(circle.getBounds(), { padding: [30, 30], maxZoom: 18 }); }, 100);
+    }
+
+    // ---------- CRUD Siswa ----------
+    function renderSiswa() {
+      $('siswa-tbody').innerHTML = dataSiswa.length === 0
+        ? `<tr><td colspan="6" class="text-center text-secondary py-4">Belum ada data siswa</td></tr>`
+        : dataSiswa.map(s => `
+          <tr>
+            <td class="font-monospace">${esc(s.nisn)}</td>
+            <td class="fw-semibold">${esc(s.nama)}</td>
+            <td>${esc(s.kelas)}</td>
+            <td class="font-monospace">${esc(s.username)}</td>
+            <td class="font-monospace">${esc(s.password)}</td>
+            <td class="text-center text-nowrap">
+              <button onclick="editSiswa('${s.id}')" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen"></i></button>
+              <button onclick="deleteSiswa('${s.id}')" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-trash"></i></button>
+            </td>
+          </tr>`).join('');
+    }
+
+    function fillKelasOptions(selected) {
+      const names = dataKelas.map(k => k.nama);
+      if (selected && !names.includes(selected)) names.push(selected);
+      $('siswa-kelas').innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+      if (selected) $('siswa-kelas').value = selected;
+    }
+
+    function openModalSiswa() {
+      if (dataKelas.length === 0) { notify('Tambahkan data kelas terlebih dahulu.', 'warning'); return; }
+      $('modal-siswa-title').innerText = 'Tambah Data Siswa';
+      ['siswa-id', 'siswa-nisn', 'siswa-nama', 'siswa-username', 'siswa-password'].forEach(id => $(id).value = '');
+      fillKelasOptions();
+      showModal('modal-siswa');
+    }
+    const closeModalSiswa = () => hideModal('modal-siswa');
+
+    function saveSiswa(e) {
+      e.preventDefault();
+      const id = $('siswa-id').value;
+      const nisn = $('siswa-nisn').value.trim();
+      const nama = $('siswa-nama').value.trim();
+      const kelas = $('siswa-kelas').value;
+      const username = $('siswa-username').value.trim();
+      const password = $('siswa-password').value;
+
+      if (dataSiswa.some(s => s.nisn === nisn && s.id !== id)) { notify('NISN sudah terdaftar!', 'danger'); return; }
+      if (dataSiswa.some(s => s.username === username && s.id !== id)) { notify('Username sudah dipakai siswa lain!', 'danger'); return; }
+      if (username === 'admin' || username === auth.email) { notify('Username tersebut dicadangkan untuk admin.', 'danger'); return; }
+
+      if (id) {
+        const idx = dataSiswa.findIndex(s => s.id === id);
+        dataSiswa[idx] = { id, nisn, nama, kelas, username, password };
+        dataAbsensi.forEach(a => { if (a.siswaId === id) { a.namaSiswa = nama; a.kelas = kelas; } });
+      } else {
+        dataSiswa.push({ id: 'S' + Date.now(), nisn, nama, kelas, username, password });
+      }
+      syncStorage();
+      closeModalSiswa();
+      renderSiswa();
+      notify('Data siswa disimpan.');
+    }
+
+    function editSiswa(id) {
+      const s = dataSiswa.find(item => item.id === id);
+      if (!s) return;
+      openModalSiswa();
+      $('modal-siswa-title').innerText = 'Edit Data Siswa';
+      $('siswa-id').value = s.id;
+      $('siswa-nisn').value = s.nisn;
+      $('siswa-nama').value = s.nama;
+      $('siswa-username').value = s.username;
+      $('siswa-password').value = s.password;
+      fillKelasOptions(s.kelas);
+    }
+
+    async function deleteSiswa(id) {
+      if (!await askConfirm('Yakin ingin menghapus siswa ini? Riwayat absensinya juga akan dihapus.', 'Hapus Siswa', 'Hapus', 'btn-danger')) return;
+      dataSiswa = dataSiswa.filter(s => s.id !== id);
+      dataAbsensi = dataAbsensi.filter(a => a.siswaId !== id);
+      syncStorage();
+      renderSiswa();
+      notify('Siswa dihapus.', 'secondary');
+    }
+
+    // ---------- CRUD Kelas ----------
+    function renderKelas() {
+      $('kelas-tbody').innerHTML = dataKelas.length === 0
+        ? `<tr><td colspan="3" class="text-center text-secondary py-4">Belum ada data kelas</td></tr>`
+        : dataKelas.map(k => `
+          <tr>
+            <td class="fw-semibold">${esc(k.nama)}</td>
+            <td>${esc(k.wali)}</td>
+            <td class="text-center text-nowrap">
+              <button onclick="editKelas('${k.id}')" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen"></i></button>
+              <button onclick="deleteKelas('${k.id}')" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-trash"></i></button>
+            </td>
+          </tr>`).join('');
+    }
+
+    function openModalKelas() {
+      $('modal-kelas-title').innerText = 'Tambah Data Kelas';
+      ['kelas-id', 'kelas-nama', 'kelas-wali'].forEach(id => $(id).value = '');
+      showModal('modal-kelas');
+    }
+    const closeModalKelas = () => hideModal('modal-kelas');
+
+    function saveKelas(e) {
+      e.preventDefault();
+      const id = $('kelas-id').value;
+      const nama = $('kelas-nama').value.trim();
+      const wali = $('kelas-wali').value.trim();
+
+      if (dataKelas.some(k => k.nama.toLowerCase() === nama.toLowerCase() && k.id !== id)) { notify('Nama kelas sudah ada!', 'danger'); return; }
+
+      if (id) {
+        const idx = dataKelas.findIndex(k => k.id === id);
+        const namaLama = dataKelas[idx].nama;
+        dataKelas[idx] = { id, nama, wali };
+        if (namaLama !== nama) {
+          dataSiswa.forEach(s => { if (s.kelas === namaLama) s.kelas = nama; });
+          dataAbsensi.forEach(a => { if (a.kelas === namaLama) a.kelas = nama; });
+        }
+      } else {
+        dataKelas.push({ id: 'K' + Date.now(), nama, wali });
+      }
+      syncStorage();
+      closeModalKelas();
+      renderKelas();
+      notify('Data kelas disimpan.');
+    }
+
+    function editKelas(id) {
+      const k = dataKelas.find(item => item.id === id);
+      if (!k) return;
+      openModalKelas();
+      $('modal-kelas-title').innerText = 'Edit Data Kelas';
+      $('kelas-id').value = k.id;
+      $('kelas-nama').value = k.nama;
+      $('kelas-wali').value = k.wali;
+    }
+
+    async function deleteKelas(id) {
+      const k = dataKelas.find(item => item.id === id);
+      if (!k) return;
+      if (dataSiswa.some(s => s.kelas === k.nama)) { notify('Kelas ini masih memiliki siswa. Pindahkan / hapus siswanya terlebih dahulu.', 'warning', 5000); return; }
+      if (!await askConfirm('Yakin hapus kelas ini?', 'Hapus Kelas', 'Hapus', 'btn-danger')) return;
+      dataKelas = dataKelas.filter(x => x.id !== id);
+      syncStorage();
+      renderKelas();
+      notify('Kelas dihapus.', 'secondary');
+    }
+
+    // ---------- Input absensi (admin) ----------
+    function prepareAbsensiAdmin() {
+      $('adm-siswa-id').innerHTML = '<option value="">-- Pilih Siswa --</option>' +
+        dataSiswa.map(s => `<option value="${s.id}">${esc(s.nama)} (${esc(s.kelas)})</option>`).join('');
+      resetPhoto('adm-');
+      startCamera('adm-');   // laptop: webcam langsung siap
+    }
+
+    function buatRecord(siswa, status, lat, lng, foto, now) {
+      const j = jarakKeSekolah(lat, lng);
+      return {
+        id: 'A' + Date.now(), siswaId: siswa.id, namaSiswa: siswa.nama, kelas: siswa.kelas,
+        status, tanggal: localDate(now), waktu: localTime(now), lat, lng, foto,
+        jarak: j == null ? null : Math.round(j),
+        sumber: 'siswa'
+      };
+    }
+
+    async function submitAbsensiAdmin(e) {
+      e.preventDefault();
+      const siswa = dataSiswa.find(s => s.id === $('adm-siswa-id').value);
+      if (!siswa) { notify('Pilih siswa terlebih dahulu.', 'warning'); return; }
+      const status = $('adm-status').value;
+      const now = new Date();
+      const tanggal = localDate(now);
+
+      const sudahAda = dataAbsensi.find(a => a.siswaId === siswa.id && a.tanggal === tanggal);
+      if (sudahAda && !await askConfirm(`${siswa.nama} sudah diabsen hari ini (${sudahAda.status}). Ganti dengan data baru?`, 'Absensi Sudah Ada', 'Ganti', 'btn-warning')) return;
+      if (sudahAda) dataAbsensi = dataAbsensi.filter(a => a.id !== sudahAda.id);
+
+      const rec = buatRecord(siswa, status, '', '', photoData['adm-'], now);
+      rec.sumber = 'admin';        // input langsung oleh admin/guru (tanpa lokasi)
+      dataAbsensi.push(rec);
+      syncStorage();
+      notify('Absensi berhasil disimpan!');
+      switchPage('riwayat');
+    }
+
+    // ---------- Riwayat (admin) ----------
+    function renderRiwayat() {
+      const filterTgl = $('filter-tanggal').value;
+      let list = dataAbsensi.slice();
+      if (filterTgl) list = list.filter(a => a.tanggal === filterTgl);
+
+      $('riwayat-tbody').innerHTML = list.length === 0
+        ? `<tr><td colspan="7" class="text-center text-secondary py-4">Tidak ada riwayat absensi ditemukan</td></tr>`
+        : list.reverse().map(a => {
+          const j = jarakRecord(a);
+          const luar = j != null && j > SEKOLAH.radius;
+          return `
+          <tr>
+            <td><span class="fw-bold">${esc(a.tanggal)}</span> <span class="text-secondary">${esc(a.waktu)}</span></td>
+            <td class="fw-semibold">${esc(a.namaSiswa)}<div class="text-secondary fw-normal" style="font-size:.75rem">${esc(a.kelas)}</div></td>
+            <td><span class="badge rounded-pill ${badgeClass(a.status)}">${esc(a.status)}</span></td>
+            <td>${a.lat ? `<a href="https://www.google.com/maps?q=${encodeURIComponent(a.lat)},${encodeURIComponent(a.lng)}" target="_blank" rel="noopener">Lihat Peta (${esc(Number(a.lat).toFixed(4))})</a>` : 'N/A'}</td>
+            <td class="${luar ? 'text-danger fw-semibold' : 'text-secondary'}">${a.sumber === 'admin' ? 'Input admin' : fmtJarak(j)}${luar ? ' • luar area' : ''}</td>
+            <td class="text-center">${a.foto ? `<img src="${a.foto}" alt="Foto" class="rounded" style="width:42px;height:42px;object-fit:cover">` : '-'}</td>
+            <td class="text-center"><button onclick="deleteAbsensi('${a.id}')" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-trash"></i></button></td>
+          </tr>`;
+        }).join('');
+    }
+
+    async function deleteAbsensi(id) {
+      if (!await askConfirm('Hapus entri absensi ini?', 'Hapus Absensi', 'Hapus', 'btn-danger')) return;
+      dataAbsensi = dataAbsensi.filter(a => a.id !== id);
+      syncStorage();
+      renderRiwayat();
+      notify('Entri absensi dihapus.', 'secondary');
+    }
+
+    // ---------- Rekap ----------
+    function hitungRekap(siswaId) {
+      const abs = dataAbsensi.filter(a => a.siswaId === siswaId);
+      return {
+        hadir: abs.filter(a => a.status === 'Hadir').length,
+        izin: abs.filter(a => a.status === 'Izin').length,
+        sakit: abs.filter(a => a.status === 'Sakit').length,
+        alfa: abs.filter(a => a.status === 'Alfa').length
+      };
+    }
+
+    function renderRekap() {
+      $('rekap-tbody').innerHTML = dataSiswa.length === 0
+        ? `<tr><td colspan="7" class="text-center text-secondary py-4">Belum ada data siswa</td></tr>`
+        : dataSiswa.map(s => {
+          const r = hitungRekap(s.id);
+          return `
+          <tr>
+            <td class="font-monospace">${esc(s.nisn)}</td>
+            <td class="fw-semibold">${esc(s.nama)}</td>
+            <td>${esc(s.kelas)}</td>
+            <td class="text-center fw-bold text-success">${r.hadir}</td>
+            <td class="text-center fw-bold text-warning">${r.izin}</td>
+            <td class="text-center fw-bold text-indigo">${r.sakit}</td>
+            <td class="text-center fw-bold text-danger">${r.alfa}</td>
+          </tr>`;
+        }).join('');
+    }
+
+    function csvCell(v) { return '"' + String(v ?? '').replace(/"/g, '""') + '"'; }
+
+    function exportCSV() {
+      let csv = '\uFEFFNISN,Nama Siswa,Kelas,Hadir,Izin,Sakit,Alfa\n';
+      dataSiswa.forEach(s => {
+        const r = hitungRekap(s.id);
+        csv += [csvCell(s.nisn), csvCell(s.nama), csvCell(s.kelas), r.hadir, r.izin, r.sakit, r.alfa].join(',') + '\n';
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rekap_absensi_${localDate()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      notify('File CSV diunduh.');
+    }
+
+    // ---------- Profil & pengaturan ----------
+    function prepareProfil() {
+      $('profil-nama').value = currentUser.nama;
+      $('profil-email').value = currentUser.email;
+      $('profil-pass').value = '';
+      $('cfg-coord').innerText = `${SEKOLAH.lat}, ${SEKOLAH.lng}`;
+      $('cfg-link').href = SEKOLAH.mapsUrl;
+      $('cfg-radius').value = SEKOLAH.radius;
+    }
+
+    function saveProfil(e) {
+      e.preventDefault();
+      const nama = $('profil-nama').value.trim();
+      const email = $('profil-email').value.trim();
+      const pass = $('profil-pass').value;
+
+      if (dataSiswa.some(s => s.username === email)) { notify('Username tersebut sudah dipakai oleh siswa.', 'danger'); return; }
+
+      currentUser.nama = nama; currentUser.email = email;
+      auth.nama = nama; auth.email = email;
+      if (pass) auth.password = pass;
+
+      localStorage.setItem('user_session', JSON.stringify(currentUser));
+      syncStorage();
+      $('user-display-name').innerText = nama;
+      $('user-display-email').innerText = email;
+      $('profil-pass').value = '';
+      notify('Profil berhasil diperbarui!');
+    }
+
+    function saveConfig(e) {
+      e.preventDefault();
+      const r = Number($('cfg-radius').value);
+      if (!(r >= 20 && r <= 5000)) { notify('Radius harus antara 20 - 5000 meter.', 'danger'); return; }
+      SEKOLAH.radius = r;
+      config.radius = r;
+      syncStorage();
+      notify('Pengaturan disimpan (radius ' + r + ' m).');
+    }
+
+    // ============================================================
+    //                        TAMPILAN SISWA
+    // ============================================================
+    const SPAGES = ['beranda', 'riwayat', 'profil'];
+    const getMe = () => dataSiswa.find(s => s.id === currentUser.siswaId);
+
+    function showStudentApp() {
+      $('page-login').classList.add('hidden-page');
+      $('admin-app').classList.add('hidden-page');
+      $('student-app').classList.remove('hidden-page');
+      switchStudentPage('beranda');
+    }
+
+    function switchStudentPage(pageId) {
+      SPAGES.forEach(p => $('spage-' + p).classList.add('hidden-page'));
+      $('spage-' + pageId).classList.remove('hidden-page');
+      document.querySelectorAll('#student-app [data-spage]').forEach(b => b.classList.toggle('active', b.dataset.spage === pageId));
+      window.scrollTo({ top: 0 });
+      if (pageId !== 'beranda') { stopStdWatch(); stopCamera(); }
+
+      const me = getMe();
+      $('std-name').innerText = me.nama;
+      $('std-kelas').innerText = `${me.kelas} • NISN ${me.nisn}`;
+      $('std-date').innerText = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      if (pageId === 'beranda') renderStudentHome();
+      if (pageId === 'riwayat') renderStudentRiwayat();
+      if (pageId === 'profil') renderStudentProfil();
+    }
+
+    function renderStudentHome() {
+      const me = getMe();
+      const r = hitungRekap(me.id);
+      $('std-c-hadir').innerText = r.hadir;
+      $('std-c-izin').innerText = r.izin;
+      $('std-c-sakit').innerText = r.sakit;
+      $('std-c-alfa').innerText = r.alfa;
+
+      const today = dataAbsensi.find(a => a.siswaId === me.id && a.tanggal === localDate());
+      if (today) {
+        $('std-form-card').classList.add('hidden-page');
+        $('std-done').classList.remove('hidden-page');
+        stopStdWatch();
+        stopCamera();
+        $('std-done-info').innerText = `Dicatat pukul ${today.waktu}`;
+        $('std-done-status').innerHTML = `<span class="badge rounded-pill fs-6 ${badgeClass(today.status)}">${esc(today.status)}</span>`;
+      } else {
+        $('std-done').classList.add('hidden-page');
+        $('std-form-card').classList.remove('hidden-page');
+        resetPhoto('std-');
+        initStdMap();
+        setPermUI('checking');
+        startStdWatch();       // lokasi diminta & dipantau otomatis
+        startCamera('std-');   // laptop: webcam langsung siap
+        pantauIzinLokasi();
+      }
+    }
+
+    async function submitAbsensiSiswa(e) {
+      e.preventDefault();
+      const me = getMe();
+      const now = new Date();
+      if (dataAbsensi.some(a => a.siswaId === me.id && a.tanggal === localDate(now))) {
+        notify('Anda sudah absen hari ini.', 'warning');
+        renderStudentHome();
+        return;
+      }
+
+      const status = $('std-status').value;
+      const wajib = statusWajibLokasi(status);
+      const btn = $('std-submit');
+      let lat = $('std-lat').value, lng = $('std-lng').value;
+
+      if (wajib && !photoData['std-']) {
+        notify('Foto selfie wajib diambil untuk absensi Hadir.', 'warning', 4500);
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Memeriksa lokasi...';
+      try {
+        if (wajib) {
+          // Ambil posisi TERBARU saat kirim
+          let pos;
+          try { pos = await ambilPosisi(); }
+          catch (err) {
+            setPermFromError(err);
+            notify('Absensi Hadir wajib memverifikasi lokasi.\n' + pesanErrorGPS(err), 'danger', 6000);
+            return;
+          }
+
+          stdPos = pos;
+          lat = pos.lat; lng = pos.lng;
+          $('std-lat').value = lat; $('std-lng').value = lng;
+          $('std-gps-status').innerText = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)} (akurasi ±${Math.round(pos.acc)} m)`;
+          showStdMap(lat, lng);
+          updateStdLocationUI();
+
+          const d = hitungJarak(lat, lng, SEKOLAH.lat, SEKOLAH.lng);
+          if (d > SEKOLAH.radius) {
+            notify(`Absensi ditolak.\nAnda berada ${fmtJarak(d)} dari sekolah (maksimal ${SEKOLAH.radius} m).`, 'danger', 6000);
+            return;
+          }
+        }
+
+        dataAbsensi.push(buatRecord(me, status, lat, lng, photoData['std-'], now));
+        syncStorage();
+        notify('Absensi berhasil dikirim!');
+        renderStudentHome();
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Kirim Absensi';
+      }
+    }
+
+    function renderStudentRiwayat() {
+      const me = getMe();
+      const list = dataAbsensi.filter(a => a.siswaId === me.id).slice().reverse();
+      $('std-riwayat-list').innerHTML = !list.length
+        ? `<div class="card border-0 shadow-sm"><div class="card-body text-center text-secondary small py-4">Belum ada riwayat absensi</div></div>`
+        : list.map(a => `
+          <div class="card border-0 shadow-sm"><div class="card-body p-3 d-flex align-items-center gap-3">
+            ${a.foto ? `<img src="${a.foto}" alt="Foto" class="rounded-3" style="width:56px;height:56px;object-fit:cover">`
+                     : `<div class="rounded-3 bg-light text-secondary d-flex align-items-center justify-content-center" style="width:56px;height:56px"><i class="fa-solid fa-image"></i></div>`}
+            <div class="flex-grow-1" style="min-width:0">
+              <div class="fw-semibold small">${esc(new Date(a.tanggal + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' }))}</div>
+              <div class="text-secondary" style="font-size:.75rem">${esc(a.waktu)}${jarakRecord(a) != null ? ' • ' + fmtJarak(jarakRecord(a)) + ' dari sekolah' : ''}
+                ${a.lat ? ` • <a href="https://www.google.com/maps?q=${encodeURIComponent(a.lat)},${encodeURIComponent(a.lng)}" target="_blank" rel="noopener" class="text-success">peta</a>` : ''}</div>
+            </div>
+            <span class="badge rounded-pill ${badgeClass(a.status)}">${esc(a.status)}</span>
+          </div></div>`).join('');
+    }
+
+    function renderStudentProfil() {
+      const me = getMe();
+      $('sp-nama').innerText = me.nama;
+      $('sp-nisn').innerText = me.nisn;
+      $('sp-kelas').innerText = me.kelas;
+      $('sp-user').innerText = me.username;
+      $('sp-old').value = '';
+      $('sp-new').value = '';
+    }
+
+    function saveProfilSiswa(e) {
+      e.preventDefault();
+      const me = getMe();
+      if ($('sp-old').value !== me.password) { notify('Password lama salah.', 'danger'); return; }
+      me.password = $('sp-new').value;
+      syncStorage();
+      $('sp-old').value = '';
+      $('sp-new').value = '';
+      notify('Password berhasil diubah!');
+    }
+  </script>
+</body>
+</html>
